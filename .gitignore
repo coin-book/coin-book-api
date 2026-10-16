@@ -1,0 +1,6 @@
+/tmp/
+/bin/
+*.csv
+!testdata/**/*.csv
+!internal/**/testdata/*.csv
+.env

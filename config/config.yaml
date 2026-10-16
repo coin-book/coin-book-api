@@ -1,0 +1,33 @@
+server:
+  port: "8080"
+  cookie_secure: false
+  allowed_origins:
+    - http://localhost:5173
+    - http://127.0.0.1:5173
+  # DNS-rebinding guard: requests naming any other Host are refused.
+  allowed_hosts:
+    - localhost
+    - 127.0.0.1
+    - api
+  auth_rate_limit_per_minute: 20
+  docs_enabled: true
+  seed_demo: false
+  max_upload_mb: 20
+
+postgres:
+  host: localhost
+  port: 5432
+  user: coinbook
+  dbname: coinbook
+  sslmode: disable
+
+log:
+  level: info
+  format: json
+
+jwt:
+  access_token_minutes: 60
+  refresh_token_hours: 720
+
+storage:
+  imports_dir: /data/imports

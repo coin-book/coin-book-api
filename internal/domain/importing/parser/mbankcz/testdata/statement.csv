@@ -1,0 +1,38 @@
+mBank S.A., organizaèní složka
+Testovací 123/45, 186 00 Praha 8
+www.mbank.cz;
+Infolinka: 222 111 999;
+#Klient;
+Testovaci Klient;
+;
+;
+;
+
+
+Seznam operací;
+
+#Za období:;
+01.10.2026;14.10.2026;
+
+#dle vybraných filtrù;
+      #pro úèty:;
+      Testovaci Klient - 000019-1234567890/6210;
+      
+      #Tento dokument má jen informativní charakter a proto ho není možné použít pro úèely prokázání stavu nebo pohybu na bankovním úètu klienta.;
+      
+      #Mìna;#Pøíjmy;#Výdaje;
+CZK;62000,00;-15366,50;
+      
+#Datum operace;#Popis operace;#Úèet;#Kategorie;#Èástka;
+2026-10-14;ROHLIK.CZ  PLATBA KARTOU                                                                          ;mKonto Test 6210 ... 7890;Potraviny a drogerie;-1249,00 CZK;;
+2026-10-14;KAVARNA U TESTU  PLATBA KARTOU                                                                    ;mKonto Test 6210 ... 7890;Restaurace;-89,00 CZK;;
+2026-10-12;ODCHOZÍ OKAMŽITÁ PLATBA  JAN TESTOVACI  000000 1234567890 0100                                    ;mKonto Test 6210 ... 7890;Bez kategorie - jiné;-5000,00 CZK;;
+2026-10-10;VS:2026001  FIRMA TEST S.R.O.  VYPLATA 09/2026  000019 2000000001 0800                            ;mKonto Test 6210 ... 7890;Výplata;62000,00 CZK;;
+2026-10-10;VLASTNÍ PØEVOD  JAN TESTOVACI  000000 9999999999 2010  VS:42  KS:0308                             ;mKonto Test 6210 ... 7890;Pøevod mezi vlastními úèty;-3000,00 CZK;;
+2026-10-08;PØEVOD NA MSPOØENÍ                                                                                ;mKonto Test 6210 ... 7890;Vklady a spoøení;-2000,00 CZK;;
+2026-10-08;ROHLIK.CZ  PLATBA KARTOU                                                                          ;mKonto Test 6210 ... 7890;Potraviny a drogerie;-1249,00 CZK;;
+2026-10-08;ROHLIK.CZ  PLATBA KARTOU                                                                          ;mKonto Test 6210 ... 7890;Potraviny a drogerie;-1249,00 CZK;;
+2026-10-02;BENZINA TEST  PLATBA NA INTERNETU                                                                 ;mKonto Test 6210 ... 7890;Pohonné hmoty;-1530,50 CZK;;
+
+Testovací patièka bez støedníkù
+Další informace najdete na https://www.mbank.cz

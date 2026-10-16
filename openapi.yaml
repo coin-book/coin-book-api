@@ -1,0 +1,2800 @@
+components:
+  schemas:
+    Account:
+      additionalProperties: false
+      properties:
+        account_number:
+          type: string
+        archived:
+          type: boolean
+        balance:
+          $ref: "#/components/schemas/Amount"
+          description: Opening balance plus every imported movement.
+        color_key:
+          type: string
+        currency:
+          type: string
+        id:
+          type: string
+        institution:
+          enum:
+            - mbank_cz
+            - mbank_sk
+            - revolut
+            - ibkr
+            - other
+          type: string
+        kind:
+          enum:
+            - current
+            - savings
+            - pocket
+            - fund
+            - broker
+          type: string
+        last_booked_on:
+          format: date
+          type: string
+        name:
+          type: string
+        opening_balance:
+          $ref: "#/components/schemas/Amount"
+        transaction_count:
+          format: int64
+          type: integer
+      required:
+        - id
+        - name
+        - institution
+        - kind
+        - currency
+        - opening_balance
+        - balance
+        - transaction_count
+        - archived
+      type: object
+    AgentToken:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        id:
+          type: string
+        last4:
+          type: string
+        last_used_at:
+          format: date-time
+          type: string
+        name:
+          type: string
+        revoked_at:
+          format: date-time
+          type: string
+        scopes:
+          items:
+            type: string
+          type: array
+      required:
+        - id
+        - name
+        - last4
+        - scopes
+        - created_at
+      type: object
+    AmbiguousTransfer:
+      additionalProperties: false
+      properties:
+        candidate_ids:
+          description: Incoming movements that could be its other leg.
+          items:
+            type: string
+          type: array
+        transaction_id:
+          description: The outgoing leg.
+          type: string
+      required:
+        - transaction_id
+        - candidate_ids
+      type: object
+    Amount:
+      additionalProperties: false
+      properties:
+        currency:
+          description: ISO 4217 code.
+          maxLength: 3
+          minLength: 3
+          type: string
+        minor:
+          description: Amount in the currency's smallest unit (haléře, cents).
+          format: int64
+          type: integer
+      required:
+        - minor
+        - currency
+      type: object
+    Assignment:
+      additionalProperties: false
+      properties:
+        amount_minor:
+          format: int64
+          type: integer
+        category_id:
+          type: string
+        source:
+          enum:
+            - rule
+            - manual
+            - bank
+          type: string
+      required:
+        - category_id
+        - amount_minor
+        - source
+      type: object
+    AuditEntry:
+      additionalProperties: false
+      properties:
+        id:
+          format: int64
+          type: integer
+        occurred_at:
+          format: date-time
+          type: string
+        operation:
+          type: string
+        result_count:
+          format: int64
+          type: integer
+        status:
+          format: int64
+          type: integer
+        token_id:
+          type: string
+        token_name:
+          type: string
+      required:
+        - id
+        - token_id
+        - token_name
+        - operation
+        - status
+        - occurred_at
+      type: object
+    BudgetGroup:
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        id:
+          type: string
+        name_cs:
+          type: string
+        name_sk:
+          type: string
+        sort:
+          format: int64
+          type: integer
+      required:
+        - id
+        - code
+        - name_cs
+        - name_sk
+        - sort
+      type: object
+    BudgetLine:
+      additionalProperties: false
+      properties:
+        budget_group_id:
+          type: string
+        category_id:
+          type: string
+        planned_minor:
+          format: int64
+          type: integer
+        projected_minor:
+          description: Spending by month end at the current pace.
+          format: int64
+          type: integer
+        remaining_minor:
+          format: int64
+          type: integer
+        spent_minor:
+          format: int64
+          type: integer
+        status:
+          enum:
+            - on_track
+            - ahead_of_pace
+            - over
+          type: string
+      required:
+        - planned_minor
+        - spent_minor
+        - remaining_minor
+        - projected_minor
+        - status
+      type: object
+    BudgetLineInput:
+      additionalProperties: false
+      properties:
+        budget_group_id:
+          type: string
+        category_id:
+          type: string
+        planned_minor:
+          format: int64
+          minimum: 0
+          type: integer
+      required:
+        - planned_minor
+      type: object
+    BudgetMonth:
+      additionalProperties: false
+      properties:
+        currency:
+          type: string
+        days_left:
+          description: Including today.
+          format: int64
+          type: integer
+        elapsed:
+          description: Share of the month gone, 0–1; where the pace marker sits.
+          format: double
+          type: number
+        lines:
+          items:
+            $ref: "#/components/schemas/BudgetLine"
+          type: array
+        month:
+          examples:
+            - 2026-10
+          type: string
+        per_day_minor:
+          format: int64
+          type: integer
+        planned_minor:
+          format: int64
+          type: integer
+        remaining_minor:
+          description: What is left to spend this month (F-VYU-3).
+          format: int64
+          type: integer
+        spent_minor:
+          format: int64
+          type: integer
+        unbudgeted:
+          description: Main categories with spending but no budget line.
+          items:
+            $ref: "#/components/schemas/UnbudgetedCategory"
+          type: array
+      required:
+        - month
+        - currency
+        - lines
+        - unbudgeted
+        - planned_minor
+        - spent_minor
+        - remaining_minor
+        - elapsed
+        - days_left
+        - per_day_minor
+      type: object
+    CategorizeInputBody:
+      additionalProperties: false
+      properties:
+        lines:
+          description: One line, or several for a split; they must add up to the amount.
+          items:
+            $ref: "#/components/schemas/CategoryLine"
+          maxItems: 20
+          minItems: 1
+          type: array
+        save_rule:
+          description: Turn a single-line choice into a rule matching on this field.
+          enum:
+            - counterparty
+            - description
+            - counterparty_account
+          type: string
+      required:
+        - lines
+      type: object
+    CategorizeOutputBody:
+      additionalProperties: false
+      properties:
+        applied_to_other:
+          description: Other transactions the new rule categorised.
+          format: int64
+          type: integer
+        rule_id:
+          type: string
+        transaction:
+          $ref: "#/components/schemas/Transaction"
+      required:
+        - transaction
+        - applied_to_other
+      type: object
+    Category:
+      additionalProperties: false
+      properties:
+        budget_group_id:
+          type: string
+        code:
+          type: string
+        color_key:
+          description: Theme token key; absent on a subcategory, which uses its parent's.
+          type: string
+        icon:
+          type: string
+        id:
+          type: string
+        kind:
+          enum:
+            - income
+            - expense
+            - financial
+            - transfer
+          type: string
+        name_cs:
+          type: string
+        name_sk:
+          type: string
+        parent_id:
+          type: string
+        sort:
+          format: int64
+          type: integer
+      required:
+        - id
+        - code
+        - name_cs
+        - name_sk
+        - kind
+        - sort
+      type: object
+    CategoryLine:
+      additionalProperties: false
+      properties:
+        amount_minor:
+          format: int64
+          type: integer
+        category_id:
+          type: string
+      required:
+        - category_id
+        - amount_minor
+      type: object
+    CategoryTotal:
+      additionalProperties: false
+      properties:
+        amount_minor:
+          format: int64
+          type: integer
+        category_id:
+          description: Absent for the not-yet-categorised share.
+          type: string
+      required:
+        - amount_minor
+      type: object
+    CopyBudgetOutputBody:
+      additionalProperties: false
+      properties:
+        copied:
+          format: int64
+          type: integer
+      required:
+        - copied
+      type: object
+    CreateAgentTokenInputBody:
+      additionalProperties: false
+      properties:
+        expires_in_days:
+          description: Omit for a token that does not expire.
+          format: int64
+          maximum: 365
+          minimum: 1
+          type: integer
+        name:
+          maxLength: 80
+          minLength: 1
+          type: string
+        scopes:
+          items:
+            enum:
+              - accounts:read
+              - transactions:read
+              - categories:read
+              - budgets:read
+              - reports:read
+            type: string
+          minItems: 1
+          type: array
+      required:
+        - name
+        - scopes
+      type: object
+    CreateAgentTokenOutputBody:
+      additionalProperties: false
+      properties:
+        secret:
+          description: The token itself. Shown only in this response.
+          type: string
+        token:
+          $ref: "#/components/schemas/AgentToken"
+      required:
+        - token
+        - secret
+      type: object
+    CreateRuleInputBody:
+      additionalProperties: false
+      properties:
+        category_id:
+          type: string
+        match_counterparty:
+          maxLength: 200
+          minLength: 1
+          type: string
+        match_counterparty_account:
+          maxLength: 50
+          minLength: 1
+          type: string
+        match_description:
+          maxLength: 200
+          minLength: 1
+          type: string
+        match_operation_type:
+          maxLength: 60
+          minLength: 1
+          type: string
+        match_variable_symbol:
+          maxLength: 10
+          minLength: 1
+          type: string
+        priority:
+          default: 100
+          format: int64
+          maximum: 1000
+          minimum: 0
+          type: integer
+      required:
+        - category_id
+      type: object
+    CredentialsInputBody:
+      additionalProperties: false
+      properties:
+        email:
+          format: email
+          maxLength: 254
+          type: string
+        password:
+          maxLength: 256
+          type: string
+      required:
+        - email
+        - password
+      type: object
+    ErrorDetail:
+      additionalProperties: false
+      properties:
+        location:
+          description: Where the error occurred, e.g. 'body.items[3].tags' or 'path.thing-id'
+          type: string
+        message:
+          description: Error message text
+          type: string
+        value:
+          description: The value at the given location
+      type: object
+    ImportAccount:
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        checks:
+          items:
+            $ref: "#/components/schemas/ImportCheck"
+          type: array
+        currency:
+          type: string
+        duplicates:
+          format: int64
+          type: integer
+        identity:
+          description: Bank account number or importer reference.
+          type: string
+        is_new:
+          description: The import will create this account.
+          type: boolean
+        name:
+          type: string
+        new:
+          format: int64
+          type: integer
+        rows:
+          format: int64
+          type: integer
+      required:
+        - identity
+        - name
+        - currency
+        - is_new
+        - rows
+        - new
+        - duplicates
+        - checks
+      type: object
+    ImportBatch:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        file_name:
+          type: string
+        forced:
+          type: boolean
+        format:
+          type: string
+        id:
+          type: string
+        period_from:
+          format: date
+          type: string
+        period_to:
+          format: date
+          type: string
+        rolled_back_at:
+          format: date-time
+          type: string
+        rows_duplicate:
+          format: int64
+          type: integer
+        rows_inserted:
+          format: int64
+          type: integer
+        rows_total:
+          format: int64
+          type: integer
+        status:
+          enum:
+            - committed
+            - rolled_back
+          type: string
+      required:
+        - id
+        - file_name
+        - format
+        - status
+        - forced
+        - rows_total
+        - rows_inserted
+        - rows_duplicate
+        - created_at
+      type: object
+    ImportCheck:
+      additionalProperties: false
+      properties:
+        actual_minor:
+          format: int64
+          type: integer
+        expected_minor:
+          format: int64
+          type: integer
+        kind:
+          enum:
+            - totals
+            - balance_chain
+            - declared_sum
+          type: string
+        line:
+          format: int64
+          type: integer
+        ok:
+          type: boolean
+      required:
+        - kind
+        - ok
+        - expected_minor
+        - actual_minor
+      type: object
+    ImportPreviewRow:
+      additionalProperties: false
+      properties:
+        account_identity:
+          type: string
+        amount:
+          $ref: "#/components/schemas/Amount"
+        booked_on:
+          format: date
+          type: string
+        description:
+          type: string
+        line:
+          format: int64
+          type: integer
+        status:
+          enum:
+            - new
+            - duplicate
+          type: string
+      required:
+        - account_identity
+        - line
+        - booked_on
+        - amount
+        - description
+        - status
+      type: object
+    ImportResult:
+      additionalProperties: false
+      properties:
+        accounts:
+          items:
+            $ref: "#/components/schemas/ImportAccount"
+          type: array
+        already_imported:
+          type: boolean
+        batch_id:
+          description: Set once the import is written.
+          type: string
+        categorized_by_bank:
+          format: int64
+          type: integer
+        categorized_by_rule:
+          format: int64
+          type: integer
+        checks_passed:
+          type: boolean
+        file_name:
+          type: string
+        format:
+          type: string
+        period_from:
+          format: date
+          type: string
+        period_to:
+          format: date
+          type: string
+        rows:
+          description: The first 500 rows with their status.
+          items:
+            $ref: "#/components/schemas/ImportPreviewRow"
+          type: array
+        rows_duplicate:
+          format: int64
+          type: integer
+        rows_new:
+          format: int64
+          type: integer
+        rows_total:
+          format: int64
+          type: integer
+        transfers_matched:
+          format: int64
+          type: integer
+      required:
+        - file_name
+        - format
+        - already_imported
+        - checks_passed
+        - accounts
+        - rows
+        - rows_total
+        - rows_new
+        - rows_duplicate
+        - categorized_by_rule
+        - categorized_by_bank
+        - transfers_matched
+      type: object
+    ListAccountsOutputBody:
+      additionalProperties: false
+      properties:
+        accounts:
+          items:
+            $ref: "#/components/schemas/Account"
+          type: array
+      required:
+        - accounts
+      type: object
+    ListAgentTokensOutputBody:
+      additionalProperties: false
+      properties:
+        tokens:
+          items:
+            $ref: "#/components/schemas/AgentToken"
+          type: array
+      required:
+        - tokens
+      type: object
+    ListAmbiguousOutputBody:
+      additionalProperties: false
+      properties:
+        ambiguous:
+          items:
+            $ref: "#/components/schemas/AmbiguousTransfer"
+          type: array
+      required:
+        - ambiguous
+      type: object
+    ListAuditOutputBody:
+      additionalProperties: false
+      properties:
+        entries:
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+          type: array
+      required:
+        - entries
+      type: object
+    ListImportsOutputBody:
+      additionalProperties: false
+      properties:
+        imports:
+          items:
+            $ref: "#/components/schemas/ImportBatch"
+          type: array
+      required:
+        - imports
+      type: object
+    ListTransactionsOutputBody:
+      additionalProperties: false
+      properties:
+        next_cursor:
+          type: string
+        transactions:
+          items:
+            $ref: "#/components/schemas/Transaction"
+          type: array
+      required:
+        - transactions
+      type: object
+    ListTransfersOutputBody:
+      additionalProperties: false
+      properties:
+        transfers:
+          items:
+            $ref: "#/components/schemas/TransferPair"
+          type: array
+      required:
+        - transfers
+      type: object
+    MeOutputBody:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        email:
+          type: string
+      required:
+        - email
+        - created_at
+      type: object
+    MonthTotals:
+      additionalProperties: false
+      properties:
+        expense_minor:
+          description: "Positive: money spent."
+          format: int64
+          type: integer
+        financial_minor:
+          description: "Saving and loan repayments: set aside, not spent (F-KAT-2)."
+          format: int64
+          type: integer
+        income_minor:
+          format: int64
+          type: integer
+        month:
+          type: string
+      required:
+        - month
+        - income_minor
+        - expense_minor
+        - financial_minor
+      type: object
+    MonthlyReport:
+      additionalProperties: false
+      properties:
+        currency:
+          type: string
+        expense_minor:
+          description: "Positive: money spent."
+          format: int64
+          type: integer
+        expenses:
+          description: Per main category, largest first.
+          items:
+            $ref: "#/components/schemas/CategoryTotal"
+          type: array
+        financial_minor:
+          description: "Saving and loan repayments: set aside, not spent (F-KAT-2)."
+          format: int64
+          type: integer
+        income:
+          items:
+            $ref: "#/components/schemas/CategoryTotal"
+          type: array
+        income_minor:
+          format: int64
+          type: integer
+        month:
+          type: string
+        trend:
+          description: The last six months, oldest first.
+          items:
+            $ref: "#/components/schemas/MonthTotals"
+          type: array
+      required:
+        - currency
+        - expenses
+        - income
+        - trend
+        - month
+        - income_minor
+        - expense_minor
+        - financial_minor
+      type: object
+    PairTransferInputBody:
+      additionalProperties: false
+      properties:
+        in_tx_id:
+          maxLength: 64
+          type: string
+        out_tx_id:
+          maxLength: 64
+          type: string
+      required:
+        - out_tx_id
+        - in_tx_id
+      type: object
+    Problem:
+      additionalProperties: false
+      properties:
+        code:
+          description: Stable machine-readable error identifier. Branch on this, not on `detail`.
+          enum:
+            - already_imported
+            - already_rolled_back
+            - already_set_up
+            - auth_required
+            - balance_mismatch
+            - duplicate_budget_line
+            - file_too_large
+            - forbidden
+            - host_not_allowed
+            - insufficient_scope
+            - internal_error
+            - invalid_budget_line
+            - invalid_credentials
+            - invalid_currency
+            - invalid_cursor
+            - invalid_request_body
+            - method_not_allowed
+            - not_found
+            - not_pairable
+            - not_paired
+            - nothing_to_match
+            - password_too_short
+            - rate_limited
+            - session_required
+            - split_mismatch
+            - token_ttl_too_long
+            - unknown_scope
+            - unsupported_format
+            - validation_failed
+          title: ErrorCode
+          type: string
+        detail:
+          description: English explanation; localize from code instead of showing this.
+          type: string
+        errors:
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+          type: array
+        instance:
+          description: Request id of this occurrence.
+          type: string
+        status:
+          format: int64
+          type: integer
+        title:
+          type: string
+      required:
+        - title
+        - status
+        - code
+      type: object
+    ReplaceBudgetInputBody:
+      additionalProperties: false
+      properties:
+        lines:
+          items:
+            $ref: "#/components/schemas/BudgetLineInput"
+          maxItems: 200
+          type: array
+      required:
+        - lines
+      type: object
+    RollbackOutputBody:
+      additionalProperties: false
+      properties:
+        removed:
+          format: int64
+          type: integer
+      required:
+        - removed
+      type: object
+    Rule:
+      additionalProperties: false
+      properties:
+        category_id:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        id:
+          type: string
+        match_counterparty:
+          description: Equal to the counterparty, ignoring case.
+          type: string
+        match_counterparty_account:
+          type: string
+        match_description:
+          description: Contained in the description, ignoring case.
+          type: string
+        match_operation_type:
+          type: string
+        match_variable_symbol:
+          type: string
+        priority:
+          format: int64
+          type: integer
+      required:
+        - id
+        - category_id
+        - priority
+        - created_at
+      type: object
+    RulesOutputBody:
+      additionalProperties: false
+      properties:
+        rules:
+          items:
+            $ref: "#/components/schemas/Rule"
+          type: array
+      required:
+        - rules
+      type: object
+    SessionBody:
+      additionalProperties: false
+      properties:
+        access_token:
+          type: string
+        email:
+          type: string
+        expires_in:
+          description: Seconds until the access token expires.
+          format: int64
+          type: integer
+      required:
+        - access_token
+        - expires_in
+        - email
+      type: object
+    StatusOutputBody:
+      additionalProperties: false
+      properties:
+        needs_setup:
+          description: True until the single user has been created.
+          type: boolean
+      required:
+        - needs_setup
+      type: object
+    Suggestion:
+      additionalProperties: false
+      properties:
+        category_id:
+          type: string
+        uses:
+          format: int64
+          type: integer
+      required:
+        - category_id
+        - uses
+      type: object
+    TaxonomyOutputBody:
+      additionalProperties: false
+      properties:
+        budget_groups:
+          items:
+            $ref: "#/components/schemas/BudgetGroup"
+          type: array
+        categories:
+          items:
+            $ref: "#/components/schemas/Category"
+          type: array
+      required:
+        - categories
+        - budget_groups
+      type: object
+    Transaction:
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        amount:
+          $ref: "#/components/schemas/Amount"
+        balance_after_minor:
+          format: int64
+          type: integer
+        bank_category:
+          type: string
+        booked_on:
+          format: date
+          type: string
+        categories:
+          items:
+            $ref: "#/components/schemas/Assignment"
+          type: array
+        constant_symbol:
+          type: string
+        counterparty:
+          type: string
+        counterparty_account:
+          type: string
+        description:
+          type: string
+        fee_minor:
+          format: int64
+          type: integer
+        id:
+          type: string
+        import_batch_id:
+          type: string
+        message:
+          type: string
+        operation_type:
+          type: string
+        source_line:
+          description: Line in the imported file (F-IMP-6).
+          format: int64
+          type: integer
+        specific_symbol:
+          type: string
+        transfer:
+          $ref: "#/components/schemas/Transfer"
+          description: Set when this is one leg of a transfer between own accounts.
+        variable_symbol:
+          type: string
+      required:
+        - id
+        - account_id
+        - booked_on
+        - amount
+        - fee_minor
+        - description
+        - import_batch_id
+        - source_line
+        - categories
+      type: object
+    Transfer:
+      additionalProperties: false
+      properties:
+        counterpart_account_id:
+          type: string
+        counterpart_tx_id:
+          type: string
+        matched_by:
+          enum:
+            - auto
+            - manual
+          type: string
+      required:
+        - counterpart_tx_id
+        - counterpart_account_id
+        - matched_by
+      type: object
+    TransferPair:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        in_tx_id:
+          type: string
+        matched_by:
+          enum:
+            - auto
+            - manual
+          type: string
+        out_tx_id:
+          type: string
+      required:
+        - out_tx_id
+        - in_tx_id
+        - matched_by
+        - created_at
+      type: object
+    TriageOutputBody:
+      additionalProperties: false
+      properties:
+        quick_picks:
+          description: Most used categories lately, for the 1–9 keys.
+          items:
+            $ref: "#/components/schemas/Suggestion"
+          type: array
+        remaining:
+          format: int64
+          type: integer
+        suggested:
+          description: Categories used before for the same counterparty.
+          items:
+            $ref: "#/components/schemas/Suggestion"
+          type: array
+        transaction:
+          $ref: "#/components/schemas/Transaction"
+          description: Absent when nothing is left to categorise.
+      required:
+        - remaining
+        - suggested
+        - quick_picks
+      type: object
+    UnbudgetedCategory:
+      additionalProperties: false
+      properties:
+        category_id:
+          type: string
+        spent_minor:
+          format: int64
+          type: integer
+      required:
+        - category_id
+        - spent_minor
+      type: object
+    UpdateAccountInputBody:
+      additionalProperties: false
+      properties:
+        archived:
+          type: boolean
+        color_key:
+          maxLength: 40
+          type: string
+        kind:
+          enum:
+            - current
+            - savings
+            - pocket
+            - fund
+            - broker
+          type: string
+        name:
+          maxLength: 100
+          minLength: 1
+          type: string
+        opening_balance_minor:
+          format: int64
+          type: integer
+      type: object
+    UpdateCategoryInputBody:
+      additionalProperties: false
+      properties:
+        budget_group_id:
+          type: string
+        color_key:
+          maxLength: 40
+          type: string
+        icon:
+          maxLength: 40
+          type: string
+        name_cs:
+          maxLength: 80
+          minLength: 1
+          type: string
+        name_sk:
+          maxLength: 80
+          minLength: 1
+          type: string
+      type: object
+    VersionOutputBody:
+      additionalProperties: false
+      properties:
+        commit:
+          type: string
+        go_version:
+          type: string
+        version:
+          type: string
+      required:
+        - version
+        - commit
+        - go_version
+      type: object
+  securitySchemes:
+    bearerAuth:
+      description: Either the session access token from `POST /api/v1/auth/login` (a short-lived JWT, refreshed with the HttpOnly refresh cookie) or an agent token `coinbook_pat_…` from `POST /api/v1/agent-tokens`. Agent tokens are read-only and limited to their scopes; every request made with one is written to the audit log.
+      scheme: bearer
+      type: http
+info:
+  description: |-
+    Personal finance: accounts, imported transactions, categories, transfers, budgets and reports.
+
+    Amounts are integers in the currency's smallest unit (`minor`) with an ISO 4217 `currency`; currencies are never summed together. Dates are calendar days in Europe/Prague.
+
+    Errors are `application/problem+json` (RFC 9457) with a stable `code`; branch on `code`, not `detail`.
+  title: coin-book API
+  version: 1.0.0
+openapi: 3.1.0
+paths:
+  /api/v1/accounts:
+    get:
+      description: Agent tokens need the `accounts:read` scope.
+      operationId: list-accounts
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAccountsOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Own accounts with current balances
+      tags:
+        - Accounts
+  /api/v1/accounts/{id}:
+    patch:
+      operationId: update-account
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAccountInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Rename an account, set its opening balance or archive it
+      tags:
+        - Accounts
+  /api/v1/agent-tokens:
+    get:
+      operationId: list-agent-tokens
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAgentTokensOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Agent tokens, including revoked ones
+      tags:
+        - Agent access
+    post:
+      operationId: create-agent-token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentTokenInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentTokenOutputBody"
+          description: Created
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Issue a read-only token for an AI agent
+      tags:
+        - Agent access
+  /api/v1/agent-tokens/{id}:
+    delete:
+      operationId: revoke-agent-token
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Revoke a token
+      tags:
+        - Agent access
+  /api/v1/audit-log:
+    get:
+      operationId: list-audit-log
+      parameters:
+        - description: Return entries older than this id.
+          explode: false
+          in: query
+          name: before
+          schema:
+            description: Return entries older than this id.
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAuditOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Every request made with an agent token, newest first
+      tags:
+        - Agent access
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialsInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionBody"
+          description: OK
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Too Many Requests
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      summary: Sign in
+      tags:
+        - Auth
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      responses:
+        "204":
+          description: No Content
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      summary: Clear the refresh cookie
+      tags:
+        - Auth
+  /api/v1/auth/refresh:
+    post:
+      operationId: refresh-session
+      parameters:
+        - in: cookie
+          name: coinbook_refresh
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionBody"
+          description: OK
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      summary: Exchange the refresh cookie for a new access token
+      tags:
+        - Auth
+  /api/v1/auth/setup:
+    post:
+      operationId: setup
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialsInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionBody"
+          description: OK
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Too Many Requests
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      summary: Create the single user and sign in
+      tags:
+        - Auth
+  /api/v1/auth/status:
+    get:
+      operationId: get-auth-status
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOutputBody"
+          description: OK
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      summary: Whether the user still has to be created
+      tags:
+        - Auth
+  /api/v1/budgets/{month}:
+    get:
+      description: Agent tokens need the `budgets:read` scope.
+      operationId: get-budget
+      parameters:
+        - in: path
+          name: month
+          required: true
+          schema:
+            examples:
+              - 2026-10
+            pattern: ^[0-9]{4}-[0-9]{2}$
+            type: string
+        - explode: false
+          in: query
+          name: currency
+          schema:
+            default: CZK
+            pattern: ^[A-Z]{3}$
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BudgetMonth"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Plan, actual and remaining per budget line for one month
+      tags:
+        - Budgets
+    put:
+      operationId: replace-budget
+      parameters:
+        - in: path
+          name: month
+          required: true
+          schema:
+            pattern: ^[0-9]{4}-[0-9]{2}$
+            type: string
+        - explode: false
+          in: query
+          name: currency
+          schema:
+            default: CZK
+            pattern: ^[A-Z]{3}$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceBudgetInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BudgetMonth"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Set the month's whole plan
+      tags:
+        - Budgets
+  /api/v1/budgets/{month}/copy-previous:
+    post:
+      operationId: copy-previous-budget
+      parameters:
+        - in: path
+          name: month
+          required: true
+          schema:
+            examples:
+              - 2026-10
+            pattern: ^[0-9]{4}-[0-9]{2}$
+            type: string
+        - explode: false
+          in: query
+          name: currency
+          schema:
+            default: CZK
+            pattern: ^[A-Z]{3}$
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopyBudgetOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Start an empty month from the previous month's plan
+      tags:
+        - Budgets
+  /api/v1/categories:
+    get:
+      description: Agent tokens need the `categories:read` scope.
+      operationId: list-categories
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxonomyOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: The two-level taxonomy and budget groups
+      tags:
+        - Categories
+  /api/v1/categories/{id}:
+    patch:
+      operationId: update-category
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCategoryInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Rename, recolour or regroup a category
+      tags:
+        - Categories
+  /api/v1/imports:
+    get:
+      operationId: list-imports
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListImportsOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Import history
+      tags:
+        - Imports
+    post:
+      description: Answers `409 balance_mismatch` when the statement disagrees with its own control totals (repeat with `force=true` to accept), and `409 already_imported` for a file imported before.
+      operationId: commit-import
+      parameters:
+        - description: Write the import even though its control totals do not match (F-IMP-3).
+          explode: false
+          in: query
+          name: force
+          schema:
+            description: Write the import even though its control totals do not match (F-IMP-3).
+            type: boolean
+      requestBody:
+        content:
+          multipart/form-data:
+            encoding:
+              file:
+                contentType: text/csv,text/plain,application/octet-stream
+            schema:
+              properties:
+                file:
+                  contentEncoding: binary
+                  contentMediaType: application/octet-stream
+                  format: binary
+                  type: string
+              required:
+                - file
+              type: object
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+          description: Created
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Conflict
+        "413":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Request Entity Too Large
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Import a statement atomically
+      tags:
+        - Imports
+  /api/v1/imports/preview:
+    post:
+      operationId: preview-import
+      requestBody:
+        content:
+          multipart/form-data:
+            encoding:
+              file:
+                contentType: text/csv,text/plain,application/octet-stream
+            schema:
+              properties:
+                file:
+                  contentEncoding: binary
+                  contentMediaType: application/octet-stream
+                  format: binary
+                  type: string
+              required:
+                - file
+              type: object
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "413":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Request Entity Too Large
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: "Dry-run an import: parse, check and deduplicate without writing"
+      tags:
+        - Imports
+  /api/v1/imports/{id}/rollback:
+    post:
+      operationId: rollback-import
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RollbackOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Remove every transaction an import created
+      tags:
+        - Imports
+  /api/v1/me:
+    get:
+      operationId: get-me
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: The signed-in user
+      tags:
+        - Auth
+  /api/v1/reports/monthly/{month}:
+    get:
+      description: |-
+        Transfers between own accounts are excluded.
+
+        Agent tokens need the `reports:read` scope.
+      operationId: get-monthly-report
+      parameters:
+        - in: path
+          name: month
+          required: true
+          schema:
+            examples:
+              - 2026-10
+            pattern: ^[0-9]{4}-[0-9]{2}$
+            type: string
+        - explode: false
+          in: query
+          name: currency
+          schema:
+            default: CZK
+            pattern: ^[A-Z]{3}$
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonthlyReport"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Income and spending by category for a month, with a six-month trend
+      tags:
+        - Reports
+  /api/v1/rules:
+    get:
+      description: Agent tokens need the `categories:read` scope.
+      operationId: list-rules
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Categorisation rules, in the order they are tried
+      tags:
+        - Categories
+    post:
+      operationId: create-rule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRuleInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+          description: Created
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Add a categorisation rule
+      tags:
+        - Categories
+  /api/v1/rules/{id}:
+    delete:
+      operationId: delete-rule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Delete a rule; categories it already set stay
+      tags:
+        - Categories
+  /api/v1/transactions:
+    get:
+      description: Agent tokens need the `transactions:read` scope.
+      operationId: list-transactions
+      parameters:
+        - explode: false
+          in: query
+          name: from
+          schema:
+            format: date
+            type: string
+        - explode: false
+          in: query
+          name: to
+          schema:
+            format: date
+            type: string
+        - explode: false
+          in: query
+          name: account_id
+          schema:
+            type: string
+        - description: Matches the category and its subcategories.
+          explode: false
+          in: query
+          name: category_id
+          schema:
+            description: Matches the category and its subcategories.
+            type: string
+        - description: Substring of the description or counterparty.
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Substring of the description or counterparty.
+            maxLength: 100
+            type: string
+        - description: Only transactions with no category that are not transfers.
+          explode: false
+          in: query
+          name: uncategorized
+          schema:
+            description: Only transactions with no category that are not transfers.
+            type: boolean
+        - explode: false
+          in: query
+          name: cursor
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 50
+            format: int64
+            maximum: 200
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTransactionsOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Transactions, newest first
+      tags:
+        - Transactions
+  /api/v1/transactions/{id}:
+    get:
+      description: Agent tokens need the `transactions:read` scope.
+      operationId: get-transaction
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            maxLength: 64
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: One transaction
+      tags:
+        - Transactions
+  /api/v1/transactions/{id}/categories:
+    put:
+      operationId: categorize-transaction
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            maxLength: 64
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategorizeInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategorizeOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Set the category (or split) by hand, optionally saving a rule
+      tags:
+        - Transactions
+  /api/v1/transfers:
+    get:
+      description: Agent tokens need the `transactions:read` scope.
+      operationId: list-transfers
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTransfersOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Paired transfers between own accounts, newest first
+      tags:
+        - Transfers
+    post:
+      operationId: pair-transfer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PairTransferInputBody"
+        required: true
+      responses:
+        "201":
+          description: Created
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: TransferPair two transactions as a transfer by hand
+      tags:
+        - Transfers
+  /api/v1/transfers/ambiguous:
+    get:
+      operationId: list-ambiguous-transfers
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAmbiguousOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Outgoing movements with more than one possible counterpart (F-PRE-2)
+      tags:
+        - Transfers
+  /api/v1/transfers/{tx_id}:
+    delete:
+      operationId: unpair-transfer
+      parameters:
+        - description: Either leg of the transfer.
+          in: path
+          name: tx_id
+          required: true
+          schema:
+            description: Either leg of the transfer.
+            maxLength: 64
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Undo a transfer pairing
+      tags:
+        - Transfers
+  /api/v1/triage:
+    get:
+      operationId: get-triage
+      parameters:
+        - description: Transactions the user skipped in this session.
+          explode: false
+          in: query
+          name: skip
+          schema:
+            description: Transactions the user skipped in this session.
+            items:
+              type: string
+            maxItems: 100
+            type: array
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriageOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: The next uncategorised transaction with suggestions
+      tags:
+        - Transactions
+  /api/v1/version:
+    get:
+      operationId: get-version
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionOutputBody"
+          description: OK
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      summary: What this process was built from
+      tags:
+        - Meta

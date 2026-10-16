@@ -1,0 +1,234 @@
+package categorization
+
+import (
+	"context"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rotisserie/eris"
+
+	"coin-book-api/internal/platform/db"
+)
+
+var ErrTransactionNotFound = eris.New("categorization: transaction not found")
+
+const (
+	defaultRulePriority = 100
+	suggestionLimit     = 3
+	quickPickLimit      = 9
+)
+
+type Service struct {
+	pool *pgxpool.Pool
+	repo *Repo
+}
+
+func NewService(pool *pgxpool.Pool, repo *Repo) *Service { return &Service{pool: pool, repo: repo} }
+
+type AutoStats struct {
+	ByRule int
+	ByBank int
+}
+
+// CategorizeNew assigns freshly imported transactions by rule, falling back to the
+// bank's own category. Runs inside the import transaction.
+func (s *Service) CategorizeNew(ctx context.Context, q db.Querier, candidates []Candidate) (AutoStats, error) {
+	rules, err := s.repo.Rules(ctx, q)
+	if err != nil {
+		return AutoStats{}, err
+	}
+	cats, err := s.repo.Categories(ctx, q)
+	if err != nil {
+		return AutoStats{}, err
+	}
+	byCode := make(map[string]uuid.UUID, len(cats))
+	for _, c := range cats {
+		byCode[c.Code] = c.ID
+	}
+
+	matcher := NewMatcher(rules)
+	var stats AutoStats
+	assignments := make([]newAssignment, 0, len(candidates))
+	for _, c := range candidates {
+		if rule := matcher.Match(c); rule != nil {
+			ruleID := rule.ID
+			assignments = append(assignments, newAssignment{c.TransactionID, rule.CategoryID, c.AmountMinor, SourceRule, &ruleID})
+			stats.ByRule++
+			continue
+		}
+		if id, ok := byCode[bankCategoryHints[c.BankCategory]]; ok {
+			assignments = append(assignments, newAssignment{c.TransactionID, id, c.AmountMinor, SourceBank, nil})
+			stats.ByBank++
+		}
+	}
+	if len(assignments) == 0 {
+		return stats, nil
+	}
+	return stats, s.repo.insertAssignments(ctx, q, assignments)
+}
+
+type RuleMatch string
+
+const (
+	MatchByCounterparty        RuleMatch = "counterparty"
+	MatchByDescription         RuleMatch = "description"
+	MatchByCounterpartyAccount RuleMatch = "counterparty_account"
+)
+
+type AssignResult struct {
+	Rule           *Rule
+	AppliedToOther int
+}
+
+// Assign records a manual categorisation, optionally turning it into a rule that
+// is applied straight away to every transaction not categorised by hand.
+func (s *Service) Assign(ctx context.Context, transactionID string, lines []Line, saveRule *RuleMatch) (*AssignResult, error) {
+	result := &AssignResult{}
+	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		c, err := s.repo.candidate(ctx, tx, transactionID)
+		if err != nil {
+			return err
+		}
+		if err := validateLines(c.AmountMinor, lines); err != nil {
+			return err
+		}
+		if err := s.replace(ctx, tx, transactionID, lines); err != nil {
+			return err
+		}
+		if saveRule == nil || len(lines) != 1 {
+			return nil
+		}
+		rule, err := ruleFrom(*c, lines[0].CategoryID, *saveRule)
+		if err != nil {
+			return err
+		}
+		if err := s.repo.CreateRule(ctx, tx, rule); err != nil {
+			return err
+		}
+		result.Rule = rule
+		result.AppliedToOther, err = s.applyRule(ctx, tx, *rule, transactionID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Service) replace(ctx context.Context, q db.Querier, transactionID string, lines []Line) error {
+	if err := s.repo.deleteAssignments(ctx, q, []string{transactionID}, []Source{SourceRule, SourceManual, SourceBank}); err != nil {
+		return err
+	}
+	assignments := make([]newAssignment, len(lines))
+	for i, l := range lines {
+		assignments[i] = newAssignment{transactionID, l.CategoryID, l.AmountMinor, SourceManual, nil}
+	}
+	return mapMissingCategory(s.repo.insertAssignments(ctx, q, assignments))
+}
+
+func (s *Service) applyRule(ctx context.Context, q db.Querier, rule Rule, except string) (int, error) {
+	candidates, err := s.repo.reassignable(ctx, q)
+	if err != nil {
+		return 0, err
+	}
+	matcher := NewMatcher([]Rule{rule})
+	var ids []string
+	var assignments []newAssignment
+	for _, c := range candidates {
+		if c.TransactionID == except || matcher.Match(c) == nil {
+			continue
+		}
+		ruleID := rule.ID
+		ids = append(ids, c.TransactionID)
+		assignments = append(assignments, newAssignment{c.TransactionID, rule.CategoryID, c.AmountMinor, SourceRule, &ruleID})
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if err := s.repo.deleteAssignments(ctx, q, ids, []Source{SourceBank}); err != nil {
+		return 0, err
+	}
+	return len(ids), s.repo.insertAssignments(ctx, q, assignments)
+}
+
+func ruleFrom(c Candidate, categoryID uuid.UUID, match RuleMatch) (*Rule, error) {
+	rule := &Rule{CategoryID: categoryID, Priority: defaultRulePriority}
+	value := ""
+	switch match {
+	case MatchByCounterparty:
+		value = c.Counterparty
+		rule.MatchCounterparty = &value
+	case MatchByDescription:
+		value = c.Description
+		rule.MatchDescription = &value
+	case MatchByCounterpartyAccount:
+		value = c.CounterpartyAccount
+		rule.MatchCounterpartyAccount = &value
+	}
+	if value == "" {
+		return nil, ErrNothingToMatch
+	}
+	return rule, nil
+}
+
+func validateLines(amount int64, lines []Line) error {
+	if len(lines) == 0 {
+		return ErrNoLines
+	}
+	var sum int64
+	for _, l := range lines {
+		sum += l.AmountMinor
+	}
+	if sum != amount {
+		return ErrSplitMismatch
+	}
+	return nil
+}
+
+type Triage struct {
+	TransactionID string
+	Remaining     int
+	Suggested     []Suggestion
+	QuickPicks    []Suggestion
+}
+
+// NextForTriage returns the newest uncategorised transaction not in skip, with
+// category suggestions; an empty TransactionID means nothing is left to show.
+func (s *Service) NextForTriage(ctx context.Context, remaining int, skip []string) (*Triage, error) {
+	if skip == nil {
+		skip = []string{}
+	}
+	id, err := s.repo.nextUncategorized(ctx, skip)
+	if err != nil || id == "" {
+		return &Triage{Remaining: remaining}, err
+	}
+	c, err := s.repo.candidate(ctx, s.pool, id)
+	if err != nil {
+		return nil, err
+	}
+	t := &Triage{TransactionID: id, Remaining: remaining}
+	if c.Counterparty != "" {
+		if t.Suggested, err = s.repo.suggestionsFor(ctx, c.Counterparty, suggestionLimit); err != nil {
+			return nil, err
+		}
+	}
+	t.QuickPicks, err = s.repo.recentlyUsed(ctx, quickPickLimit)
+	return t, err
+}
+
+// ClearAutomatic removes rule and bank-hint categories from transactions that turned
+// out to be transfers, which are outside income and expenses (F-PRE-3).
+func (s *Service) ClearAutomatic(ctx context.Context, q db.Querier, transactionIDs []string) error {
+	if len(transactionIDs) == 0 {
+		return nil
+	}
+	return s.repo.deleteAssignments(ctx, q, transactionIDs, []Source{SourceRule, SourceBank})
+}
+
+func mapMissingCategory(err error) error {
+	if db.IsForeignKeyViolation(err) {
+		return ErrCategoryNotFound
+	}
+	return err
+}

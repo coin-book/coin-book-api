@@ -1,0 +1,203 @@
+{
+  "Format": "revolut-consolidated-sk",
+  "Version": 1,
+  "PeriodFrom": null,
+  "PeriodTo": null,
+  "Accounts": [
+    {
+      "Ref": {
+        "Institution": "revolut",
+        "Kind": "current",
+        "Currency": "CZK",
+        "AccountNumber": null,
+        "ExternalRef": "revolut:personal:CZK",
+        "Name": "Revolut CZK"
+      },
+      "Rows": [
+        {
+          "Line": 17,
+          "BookedOn": "2026-10-02T00:00:00Z",
+          "AmountMinor": 500000,
+          "FeeMinor": 0,
+          "Description": "Dobitie z účtu Test",
+          "Counterparty": "Dobitie z účtu Test",
+          "CounterpartyAccount": "",
+          "OperationType": "topup",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Dobiť účet",
+          "BalanceAfterMinor": 1500000,
+          "IdentityKey": "2026-10-02|500000|Dobitie z účtu Test|1500000"
+        },
+        {
+          "Line": 18,
+          "BookedOn": "2026-10-05T00:00:00Z",
+          "AmountMinor": -24990,
+          "FeeMinor": 0,
+          "Description": "Testovací obchod",
+          "Counterparty": "Testovací obchod",
+          "CounterpartyAccount": "",
+          "OperationType": "merchant",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Predajca",
+          "BalanceAfterMinor": 1475010,
+          "IdentityKey": "2026-10-05|-24990|Testovací obchod|1475010"
+        },
+        {
+          "Line": 19,
+          "BookedOn": "2026-10-12T00:00:00Z",
+          "AmountMinor": -250000,
+          "FeeMinor": 0,
+          "Description": "Zamenené na EUR",
+          "Counterparty": "Zamenené na EUR",
+          "CounterpartyAccount": "",
+          "OperationType": "exchange",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Zameniť",
+          "BalanceAfterMinor": 1225010,
+          "IdentityKey": "2026-10-12|-250000|Zamenené na EUR|1225010"
+        },
+        {
+          "Line": 20,
+          "BookedOn": "2026-10-12T00:00:00Z",
+          "AmountMinor": -24990,
+          "FeeMinor": 0,
+          "Description": "Testovací obchod",
+          "Counterparty": "Testovací obchod",
+          "CounterpartyAccount": "",
+          "OperationType": "merchant",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Predajca",
+          "BalanceAfterMinor": 1200020,
+          "IdentityKey": "2026-10-12|-24990|Testovací obchod|1200020"
+        }
+      ],
+      "Totals": null,
+      "DeclaredSum": 200020
+    },
+    {
+      "Ref": {
+        "Institution": "revolut",
+        "Kind": "current",
+        "Currency": "EUR",
+        "AccountNumber": null,
+        "ExternalRef": "revolut:personal:EUR",
+        "Name": "Revolut EUR"
+      },
+      "Rows": [
+        {
+          "Line": 28,
+          "BookedOn": "2026-10-12T00:00:00Z",
+          "AmountMinor": 10000,
+          "FeeMinor": 0,
+          "Description": "Zamenené z CZK",
+          "Counterparty": "Zamenené z CZK",
+          "CounterpartyAccount": "",
+          "OperationType": "exchange",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Zameniť",
+          "BalanceAfterMinor": 13000,
+          "IdentityKey": "2026-10-12|10000|Zamenené z CZK|13000"
+        },
+        {
+          "Line": 29,
+          "BookedOn": "2026-10-13T00:00:00Z",
+          "AmountMinor": -350,
+          "FeeMinor": 0,
+          "Description": "Kavárna Testova",
+          "Counterparty": "Kavárna Testova",
+          "CounterpartyAccount": "",
+          "OperationType": "merchant",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Predajca",
+          "BalanceAfterMinor": 12650,
+          "IdentityKey": "2026-10-13|-350|Kavárna Testova|12650"
+        },
+        {
+          "Line": 30,
+          "BookedOn": "2026-10-14T00:00:00Z",
+          "AmountMinor": -2650,
+          "FeeMinor": 0,
+          "Description": "Na účet EUR Flexibilné peňažné fondy",
+          "Counterparty": "Na účet EUR Flexibilné peňažné fondy",
+          "CounterpartyAccount": "",
+          "OperationType": "other",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Iné",
+          "BalanceAfterMinor": 10000,
+          "IdentityKey": "2026-10-14|-2650|Na účet EUR Flexibilné peňažné fondy|10000"
+        }
+      ],
+      "Totals": null,
+      "DeclaredSum": 7000
+    },
+    {
+      "Ref": {
+        "Institution": "revolut",
+        "Kind": "fund",
+        "Currency": "EUR",
+        "AccountNumber": null,
+        "ExternalRef": "revolut:fund:EUR",
+        "Name": "Revolut fond EUR"
+      },
+      "Rows": [
+        {
+          "Line": 42,
+          "BookedOn": "2026-10-15T00:00:00Z",
+          "AmountMinor": 1,
+          "FeeMinor": 0,
+          "Description": "Interest earned - Flexibilné peňažné fondy",
+          "Counterparty": "Interest earned - Flexibilné peňažné fondy",
+          "CounterpartyAccount": "",
+          "OperationType": "",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Výnos fondu",
+          "BalanceAfterMinor": null,
+          "IdentityKey": "2026-10-15|1|Interest earned - Flexibilné peňažné fondy"
+        },
+        {
+          "Line": 43,
+          "BookedOn": "2026-10-16T00:00:00Z",
+          "AmountMinor": 1,
+          "FeeMinor": 0,
+          "Description": "Interest earned - Flexibilné peňažné fondy",
+          "Counterparty": "Interest earned - Flexibilné peňažné fondy",
+          "CounterpartyAccount": "",
+          "OperationType": "",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Výnos fondu",
+          "BalanceAfterMinor": null,
+          "IdentityKey": "2026-10-16|1|Interest earned - Flexibilné peňažné fondy"
+        }
+      ],
+      "Totals": null,
+      "DeclaredSum": 2
+    }
+  ]
+}

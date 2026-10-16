@@ -1,0 +1,47 @@
+[
+  {
+    "minor": 0,
+    "currency": "CZK",
+    "formatted": "0,00\u00a0K\u010d"
+  },
+  {
+    "minor": 5,
+    "currency": "CZK",
+    "formatted": "0,05\u00a0K\u010d"
+  },
+  {
+    "minor": -124900,
+    "currency": "CZK",
+    "formatted": "\u22121\u00a0249,00\u00a0K\u010d"
+  },
+  {
+    "minor": 6200000,
+    "currency": "CZK",
+    "formatted": "62\u00a0000,00\u00a0K\u010d"
+  },
+  {
+    "minor": 123456789,
+    "currency": "CZK",
+    "formatted": "1\u00a0234\u00a0567,89\u00a0K\u010d"
+  },
+  {
+    "minor": -1234,
+    "currency": "EUR",
+    "formatted": "\u221212,34\u00a0\u20ac"
+  },
+  {
+    "minor": 99,
+    "currency": "USD",
+    "formatted": "0,99\u00a0$"
+  },
+  {
+    "minor": 150000,
+    "currency": "PLN",
+    "formatted": "1\u00a0500,00\u00a0PLN"
+  },
+  {
+    "minor": -1500,
+    "currency": "JPY",
+    "formatted": "\u22121\u00a0500\u00a0JPY"
+  }
+]

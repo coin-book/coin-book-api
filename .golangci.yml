@@ -1,0 +1,48 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - depguard
+    - errorlint
+    - exhaustive
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - wastedassign
+
+  settings:
+    depguard:
+      rules:
+        # N-1: the domain makes no network calls; a future price/FX provider gets its own allowed package.
+        offline-domain:
+          files:
+            - "**/internal/domain/**"
+          deny:
+            - pkg: net/http
+              desc: the domain stays offline (N-1)
+    exhaustive:
+      default-signifies-exhaustive: true
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
