@@ -163,7 +163,7 @@ func (s *Service) MarkOwn(ctx context.Context, transactionID string, accountID u
 			return nil
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO own_transfer_rule (counterparty, account_id) VALUES ($1, $2)
-			ON CONFLICT (counterparty) DO UPDATE SET account_id = EXCLUDED.account_id`, counterparty, accountID); err != nil {
+			ON CONFLICT (user_id, counterparty) DO UPDATE SET account_id = EXCLUDED.account_id`, counterparty, accountID); err != nil {
 			return eris.Wrap(err, "save own transfer rule")
 		}
 		others, err = s.DetectOwn(ctx, tx, nil)

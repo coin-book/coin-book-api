@@ -27,7 +27,9 @@ const (
 
 	CodeInvalidCredentials Code = "invalid_credentials" //nolint:gosec // G101: an error code
 	CodePasswordTooShort   Code = "password_too_short"  //nolint:gosec // G101: an error code
-	CodeAlreadySetUp       Code = "already_set_up"
+	CodeEmailTaken         Code = "email_taken"
+	CodeEmailNotVerified   Code = "email_not_verified"
+	CodeGoogleSignInFailed Code = "google_sign_in_failed"
 	CodeSessionRequired    Code = "session_required"
 	CodeInsufficientScope  Code = "insufficient_scope"
 	CodeUnknownScope       Code = "unknown_scope"
@@ -72,7 +74,9 @@ var details = map[Code]string{ //nolint:gosec // G101: error descriptions, not c
 	CodeHostNotAllowed:      "Requests must address the API by an allowed host name.",
 	CodeInvalidCredentials:  "Incorrect email or password.",
 	CodePasswordTooShort:    "The password is too short.",
-	CodeAlreadySetUp:        "The user has already been created.",
+	CodeEmailTaken:          "A user with this email already exists.",
+	CodeEmailNotVerified:    "The sign-in provider has not verified this email address.",
+	CodeGoogleSignInFailed:  "Signing in with Google did not complete; try again.",
 	CodeSessionRequired:     "This operation needs a signed-in session; an agent token is not accepted.",
 	CodeInsufficientScope:   "The agent token does not carry the scope this operation needs.",
 	CodeUnknownScope:        "That is not a known scope.",

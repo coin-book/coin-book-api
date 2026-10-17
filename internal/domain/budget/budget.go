@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/domain/categorization"
@@ -66,13 +65,13 @@ type Month struct {
 }
 
 type Service struct {
-	pool       *pgxpool.Pool
+	pool       *db.Pool
 	spending   *spending.Repo
 	categories *categorization.Repo
 	clock      clock.Clock
 }
 
-func NewService(pool *pgxpool.Pool, spendingRepo *spending.Repo, categories *categorization.Repo, c clock.Clock) *Service {
+func NewService(pool *db.Pool, spendingRepo *spending.Repo, categories *categorization.Repo, c clock.Clock) *Service {
 	return &Service{pool: pool, spending: spendingRepo, categories: categories, clock: c}
 }
 

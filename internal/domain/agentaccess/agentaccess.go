@@ -13,8 +13,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+
+	"coin-book-api/internal/platform/db"
 )
 
 const TokenPrefix = "coinbook_pat_" //nolint:gosec // G101: a prefix, not a credential
@@ -45,6 +46,7 @@ var (
 
 type Token struct {
 	ID         uuid.UUID
+	UserID     uuid.UUID
 	Name       string
 	Last4      string
 	Scopes     []Scope
@@ -67,10 +69,10 @@ type AuditEntry struct {
 }
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
-func NewRepo(pool *pgxpool.Pool) *Repo { return &Repo{pool: pool} }
+func NewRepo(pool *db.Pool) *Repo { return &Repo{pool: pool} }
 
 func Looks(raw string) bool { return strings.HasPrefix(raw, TokenPrefix) }
 
@@ -117,8 +119,10 @@ func (r *Repo) Authenticate(ctx context.Context, raw string) (*Token, error) {
 	return t, err
 }
 
+// agent_token has no row-level policy, because a token is looked up before its user is
+// known; every other query here filters by user_id itself.
 func (r *Repo) List(ctx context.Context) ([]*Token, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+tokenColumns+` FROM agent_token ORDER BY created_at DESC`)
+	rows, err := r.pool.Query(ctx, `SELECT `+tokenColumns+` FROM agent_token WHERE user_id = current_user_id() ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, eris.Wrap(err, "list agent tokens")
 	}
@@ -135,7 +139,7 @@ func (r *Repo) List(ctx context.Context) ([]*Token, error) {
 }
 
 func (r *Repo) Revoke(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE agent_token SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, id)
+	tag, err := r.pool.Exec(ctx, `UPDATE agent_token SET revoked_at = now() WHERE id = $1 AND user_id = current_user_id() AND revoked_at IS NULL`, id)
 	if err != nil {
 		return eris.Wrap(err, "revoke agent token")
 	}
@@ -155,7 +159,7 @@ func (r *Repo) AuditLog(ctx context.Context, limit int, before *int64) ([]AuditE
 	rows, err := r.pool.Query(ctx, `
 		SELECT l.id, l.token_id, t.name, l.operation, l.status, l.result_count, l.occurred_at
 		FROM audit_log l JOIN agent_token t ON t.id = l.token_id
-		WHERE $2::bigint IS NULL OR l.id < $2
+		WHERE l.user_id = current_user_id() AND ($2::bigint IS NULL OR l.id < $2)
 		ORDER BY l.id DESC LIMIT $1`, limit, before)
 	if err != nil {
 		return nil, eris.Wrap(err, "list audit log")
@@ -168,12 +172,12 @@ func (r *Repo) AuditLog(ctx context.Context, limit int, before *int64) ([]AuditE
 	return entries, eris.Wrap(err, "read audit log")
 }
 
-const tokenColumns = `id, name, last4, scopes, expires_at, revoked_at, last_used_at, created_at` //nolint:gosec // G101: column list
+const tokenColumns = `id, user_id, name, last4, scopes, expires_at, revoked_at, last_used_at, created_at` //nolint:gosec // G101: column list
 
 func scanToken(row pgx.Row) (*Token, error) {
 	t := &Token{}
 	var scopes []string
-	if err := row.Scan(&t.ID, &t.Name, &t.Last4, &scopes, &t.ExpiresAt, &t.RevokedAt, &t.LastUsedAt, &t.CreatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Last4, &scopes, &t.ExpiresAt, &t.RevokedAt, &t.LastUsedAt, &t.CreatedAt); err != nil {
 		return nil, err
 	}
 	for _, s := range scopes {

@@ -19,7 +19,15 @@ const (
 	saltLen      = 16
 )
 
+// hashing bounds concurrent argon2 work: each call pins 64 MiB, so unlimited
+// parallel sign-in attempts would otherwise exhaust memory.
+var hashing = make(chan struct{}, maxConcurrentHashes)
+
+const maxConcurrentHashes = 4
+
 func hashPassword(password string) (string, error) {
+	hashing <- struct{}{}
+	defer func() { <-hashing }()
 	salt := make([]byte, saltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", eris.Wrap(err, "generate salt")
@@ -30,6 +38,8 @@ func hashPassword(password string) (string, error) {
 }
 
 func verifyPassword(encoded, password string) bool {
+	hashing <- struct{}{}
+	defer func() { <-hashing }()
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return false

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/platform/db"
@@ -44,11 +43,11 @@ type Categorizer interface {
 }
 
 type Service struct {
-	pool        *pgxpool.Pool
+	pool        *db.Pool
 	categorizer Categorizer
 }
 
-func NewService(pool *pgxpool.Pool, categorizer Categorizer) *Service {
+func NewService(pool *db.Pool, categorizer Categorizer) *Service {
 	return &Service{pool: pool, categorizer: categorizer}
 }
 

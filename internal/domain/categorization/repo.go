@@ -6,17 +6,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/platform/db"
 )
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
-func NewRepo(pool *pgxpool.Pool) *Repo { return &Repo{pool: pool} }
+func NewRepo(pool *db.Pool) *Repo { return &Repo{pool: pool} }
 
 // or picks the caller's transaction, or the pool when the call stands on its own.
 func (r *Repo) or(q db.Querier) db.Querier {

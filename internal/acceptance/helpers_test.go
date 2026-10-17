@@ -37,6 +37,12 @@ type client struct {
 
 func newClient(t *testing.T) *client {
 	t.Helper()
+	return newServer(t, nil).signUp("test@coinbook.local")
+}
+
+// newServer starts the API on a clean database with no user yet.
+func newServer(t *testing.T, customize func(*config.Config)) *client {
+	t.Helper()
 	pg.TruncateAll(t)
 	cfg := &config.Config{}
 	cfg.Server.AllowedHosts = []string{"127.0.0.1", "localhost"}
@@ -46,17 +52,25 @@ func newClient(t *testing.T) *client {
 	cfg.JWT.AccessTokenMinutes = 60
 	cfg.JWT.RefreshTokenHours = 24
 	cfg.Storage.ImportsDir = t.TempDir()
+	if customize != nil {
+		customize(cfg)
+	}
 
 	handler, _ := app.New(cfg, pg.Pool, clock.Fixed{At: today}, app.Build{})
 	c := &client{t: t, server: httptest.NewServer(handler)}
 	t.Cleanup(c.server.Close)
+	return c
+}
 
+// signUp registers another user on the same server and returns a client signed in as them.
+func (c *client) signUp(email string) *client {
+	c.t.Helper()
 	var session struct {
 		AccessToken string `json:"access_token"`
 	}
-	c.do(http.MethodPost, "/api/v1/auth/setup", map[string]string{"email": "test@coinbook.local", "password": "heslo-heslo-1"}, http.StatusOK, &session)
-	c.token = session.AccessToken
-	return c
+	anonymous := c.withToken("")
+	anonymous.do(http.MethodPost, "/api/v1/auth/register", map[string]string{"email": email, "password": "heslo-heslo-1"}, http.StatusOK, &session)
+	return c.withToken(session.AccessToken)
 }
 
 func (c *client) withToken(token string) *client {

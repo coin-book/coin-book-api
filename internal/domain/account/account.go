@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/domain/bank"
@@ -89,10 +88,10 @@ type WithBalance struct {
 }
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
-func NewRepo(pool *pgxpool.Pool) *Repo { return &Repo{pool: pool} }
+func NewRepo(pool *db.Pool) *Repo { return &Repo{pool: pool} }
 
 const columns = `a.id, a.name, a.institution, a.kind, a.currency, a.account_number, a.external_ref, a.parent_id,
 	a.opening_balance_minor, a.color_key, a.bank_id, a.archived, a.created_at`
@@ -237,7 +236,7 @@ func (r *Repo) FindAlias(ctx context.Context, q db.Querier, institution, identit
 
 func (r *Repo) UpsertAlias(ctx context.Context, q db.Querier, institution, identity string, accountID uuid.UUID) error {
 	_, err := q.Exec(ctx, `INSERT INTO account_alias (institution, identity, account_id) VALUES ($1, $2, $3)
-		ON CONFLICT (institution, identity) DO UPDATE SET account_id = EXCLUDED.account_id`, institution, identity, accountID)
+		ON CONFLICT (user_id, institution, identity) DO UPDATE SET account_id = EXCLUDED.account_id`, institution, identity, accountID)
 	return eris.Wrap(err, "upsert account alias")
 }
 

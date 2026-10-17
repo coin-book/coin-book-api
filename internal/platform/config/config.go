@@ -20,14 +20,17 @@ type Config struct {
 	Log      LogConfig      `mapstructure:"log"`
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	Storage  StorageConfig  `mapstructure:"storage"`
+	Google   GoogleConfig   `mapstructure:"google"`
 }
 
 type ServerConfig struct {
 	Port                   string   `mapstructure:"port"`
+	PublicURL              string   `mapstructure:"public_url"`
 	CookieSecure           bool     `mapstructure:"cookie_secure"`
 	AllowedOrigins         []string `mapstructure:"allowed_origins"`
 	AllowedHosts           []string `mapstructure:"allowed_hosts"`
 	AuthRateLimitPerMinute int      `mapstructure:"auth_rate_limit_per_minute"`
+	ClientIPHeader         string   `mapstructure:"client_ip_header"`
 	DocsEnabled            bool     `mapstructure:"docs_enabled"`
 	SeedDemo               bool     `mapstructure:"seed_demo"`
 	MaxUploadMB            int64    `mapstructure:"max_upload_mb"`
@@ -61,6 +64,15 @@ type JWTConfig struct {
 	AccessTokenMinutes int    `mapstructure:"access_token_minutes"`
 	RefreshTokenHours  int    `mapstructure:"refresh_token_hours"`
 }
+
+// GoogleConfig enables "sign in with Google" when ClientID is set.
+type GoogleConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	IssuerURL    string `mapstructure:"issuer_url"`
+}
+
+func (g *GoogleConfig) Enabled() bool { return g.ClientID != "" }
 
 type StorageConfig struct {
 	ImportsDir string `mapstructure:"imports_dir"`
@@ -99,7 +111,7 @@ func Load() (*Config, error) {
 
 // Secrets have no default in config.yaml, so AutomaticEnv alone would never see them.
 func bindSecrets(v *viper.Viper) {
-	for _, key := range []string{"jwt.secret", "postgres.password"} {
+	for _, key := range []string{"jwt.secret", "postgres.password", "google.client_secret"} {
 		_ = v.BindEnv(key)
 	}
 }
@@ -110,6 +122,10 @@ func (c *Config) Validate() error {
 	}
 	if c.Storage.ImportsDir == "" {
 		return eris.New("config: storage.imports_dir is required")
+	}
+	c.Server.PublicURL = strings.TrimRight(c.Server.PublicURL, "/")
+	if c.Google.Enabled() && (c.Google.ClientSecret == "" || c.Server.PublicURL == "") {
+		return eris.Errorf("config: Google sign-in needs %s_GOOGLE_CLIENT_SECRET and %s_SERVER_PUBLIC_URL", envPrefix, envPrefix)
 	}
 	return nil
 }

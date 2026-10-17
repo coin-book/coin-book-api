@@ -1,5 +1,7 @@
 server:
   port: "8080"
+  # Where browsers reach the app, e.g. https://coin-book.example.com; Google sends users back here.
+  public_url: ""
   cookie_secure: false
   allowed_origins:
     - http://localhost:5173
@@ -10,6 +12,9 @@ server:
     - 127.0.0.1
     - api
   auth_rate_limit_per_minute: 20
+  # Header a trusted reverse proxy fills with the client address (X-Forwarded-For); only set it
+  # when the API is reachable through that proxy alone, or a client could pick its own limit bucket.
+  client_ip_header: ""
   docs_enabled: true
   seed_demo: false
   max_upload_mb: 20
@@ -31,3 +36,8 @@ jwt:
 
 storage:
   imports_dir: /data/imports
+
+# Sign in with Google: set client_id (and COINBOOK_GOOGLE_CLIENT_SECRET) to enable it.
+google:
+  client_id: ""
+  issuer_url: https://accounts.google.com

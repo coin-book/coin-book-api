@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 	"golang.org/x/text/encoding/charmap"
 
@@ -24,6 +23,7 @@ import (
 	"coin-book-api/internal/domain/spending"
 	"coin-book-api/internal/domain/transfer"
 	"coin-book-api/internal/platform/clock"
+	"coin-book-api/internal/platform/db"
 	"coin-book-api/internal/platform/money"
 )
 
@@ -43,11 +43,20 @@ type movement struct {
 }
 
 // Demo is idempotent: a second run finds the user and the imported files and does nothing.
-func Demo(ctx context.Context, pool *pgxpool.Pool, importsDir string) error {
+func Demo(ctx context.Context, pool *db.Pool, importsDir string) error {
 	sessions := identity.NewService(pool, strings.Repeat("x", 32), time.Hour, time.Hour)
-	if _, err := sessions.Setup(ctx, DemoEmail, DemoPassword); err != nil && !errors.Is(err, identity.ErrAlreadySetUp) {
+	user, err := sessions.Register(ctx, DemoEmail, DemoPassword)
+	if errors.Is(err, identity.ErrEmailTaken) {
+		user, err = sessions.Login(ctx, DemoEmail, DemoPassword)
+	}
+	if err != nil {
 		return err
 	}
+	ctx, release, err := pool.ScopeToUser(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	categoryRepo := categorization.NewRepo(pool)
 	categorizer := categorization.NewService(pool, categoryRepo, settings.NewRepo(pool))
@@ -151,7 +160,7 @@ func decimal(minor int64) string {
 	return fmt.Sprintf("%s%d,%02d", sign, minor/100, minor%100)
 }
 
-func demoBudget(ctx context.Context, pool *pgxpool.Pool, categories *categorization.Repo, today time.Time) error {
+func demoBudget(ctx context.Context, pool *db.Pool, categories *categorization.Repo, today time.Time) error {
 	var planned bool
 	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM budget WHERE month = $1)`, spending.MonthStart(today)).Scan(&planned); err != nil || planned {
 		return eris.Wrap(err, "check demo budget")

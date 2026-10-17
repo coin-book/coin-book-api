@@ -3,6 +3,7 @@ package categorization
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,24 +26,34 @@ type Thresholds interface {
 	Threshold(ctx context.Context, q db.Querier) (float64, error)
 }
 
-// learner keeps the trained classifier until the categorised data changes.
+// maxCachedModels bounds memory with open registration; dropping the cache only costs
+// a retraining of milliseconds per user.
+const maxCachedModels = 64
+
+// learner keeps each user's trained classifier until their categorised data changes.
 type learner struct {
-	mu          sync.Mutex
+	mu     sync.Mutex
+	models map[string]trained
+}
+
+type trained struct {
 	model       *Classifier
 	fingerprint string
 }
 
 func (r *Repo) trainingFingerprint(ctx context.Context, q db.Querier) (string, error) {
+	var owner string
 	var count int64
 	var latest time.Time
 	var categories int64
 	// Merging categories moves assignments without touching assigned_at; the category count catches it.
-	err := q.QueryRow(ctx, `SELECT count(*), coalesce(max(assigned_at), 'epoch'), (SELECT count(*) FROM any_category)
-		FROM category_assignment WHERE source <> 'model'`).Scan(&count, &latest, &categories)
+	err := q.QueryRow(ctx, `SELECT coalesce(current_user_id()::text, ''), count(*), coalesce(max(assigned_at), 'epoch'),
+		(SELECT count(*) FROM any_category)
+		FROM category_assignment WHERE source <> 'model'`).Scan(&owner, &count, &latest, &categories)
 	if err != nil {
 		return "", eris.Wrap(err, "fingerprint categorised data")
 	}
-	return latest.Format(time.RFC3339Nano) + "/" + strconv.FormatInt(count, 10) + "/" + strconv.FormatInt(categories, 10), nil
+	return owner + "/" + latest.Format(time.RFC3339Nano) + "/" + strconv.FormatInt(count, 10) + "/" + strconv.FormatInt(categories, 10), nil
 }
 
 // trainingExamples are whole-transaction categories the model may learn from: not
@@ -74,17 +85,22 @@ func (s *Service) Model(ctx context.Context) (*Classifier, error) {
 	if err != nil {
 		return nil, err
 	}
+	owner, _, _ := strings.Cut(fingerprint, "/")
 	s.learner.mu.Lock()
 	defer s.learner.mu.Unlock()
-	if s.learner.model != nil && s.learner.fingerprint == fingerprint {
-		return s.learner.model, nil
+	if cached, ok := s.learner.models[owner]; ok && cached.fingerprint == fingerprint {
+		return cached.model, nil
 	}
 	examples, err := s.repo.trainingExamples(ctx, s.pool)
 	if err != nil {
 		return nil, err
 	}
-	s.learner.model, s.learner.fingerprint = Train(examples), fingerprint
-	return s.learner.model, nil
+	if _, present := s.learner.models[owner]; s.learner.models == nil || (len(s.learner.models) >= maxCachedModels && !present) {
+		s.learner.models = map[string]trained{}
+	}
+	model := Train(examples)
+	s.learner.models[owner] = trained{model: model, fingerprint: fingerprint}
+	return model, nil
 }
 
 // Suggest predicts categories for the given transactions, keyed by id.

@@ -46,18 +46,21 @@ func run() error {
 	defer stop()
 
 	connStr := cfg.Postgres.ConnectionString()
-	pool, err := db.Open(ctx, connStr)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
-	if err := db.WaitReady(ctx, pool, time.Minute); err != nil {
+	if err := db.WaitReady(ctx, connStr, time.Minute); err != nil {
 		return err
 	}
 	if err := migrate.Up(connStr); err != nil {
 		return err
 	}
 	slog.Info("migrations applied")
+	if err := db.PrepareAppRole(ctx, connStr); err != nil {
+		return err
+	}
+	pool, err := db.Open(ctx, connStr)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
 
 	if cfg.Server.SeedDemo {
 		if err := seed.Demo(ctx, pool, cfg.Storage.ImportsDir); err != nil {

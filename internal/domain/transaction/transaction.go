@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
+	"coin-book-api/internal/platform/db"
 	"coin-book-api/internal/platform/money"
 )
 
@@ -78,10 +78,10 @@ type Page struct {
 }
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
-func NewRepo(pool *pgxpool.Pool) *Repo { return &Repo{pool: pool} }
+func NewRepo(pool *db.Pool) *Repo { return &Repo{pool: pool} }
 
 const listQuery = `
 	SELECT t.id, t.account_id, t.booked_on, t.amount_minor, t.currency, t.fee_minor, t.description, t.counterparty,

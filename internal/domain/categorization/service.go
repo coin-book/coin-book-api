@@ -5,7 +5,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/platform/db"
@@ -19,13 +18,13 @@ const (
 )
 
 type Service struct {
-	pool       *pgxpool.Pool
+	pool       *db.Pool
 	repo       *Repo
 	thresholds Thresholds
 	learner    learner
 }
 
-func NewService(pool *pgxpool.Pool, repo *Repo, thresholds Thresholds) *Service {
+func NewService(pool *db.Pool, repo *Repo, thresholds Thresholds) *Service {
 	return &Service{pool: pool, repo: repo, thresholds: thresholds}
 }
 

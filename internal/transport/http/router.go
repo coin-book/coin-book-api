@@ -15,6 +15,7 @@ import (
 	"coin-book-api/internal/domain/agentaccess"
 	"coin-book-api/internal/domain/identity"
 	"coin-book-api/internal/platform/config"
+	"coin-book-api/internal/platform/db"
 	"coin-book-api/internal/transport/http/accounts"
 	"coin-book-api/internal/transport/http/agenttokens"
 	"coin-book-api/internal/transport/http/apierr"
@@ -36,6 +37,7 @@ const requestTimeout = 60 * time.Second
 
 type Deps struct {
 	Config   *config.Config
+	Pool     *db.Pool
 	Sessions *identity.Service
 	Tokens   *agentaccess.Repo
 
@@ -76,8 +78,8 @@ func NewAPI(d Deps) (http.Handler, huma.API) {
 	})
 
 	api := humachi.New(r, apiConfig(d.Config))
-	api.UseMiddleware(httpapi.RateLimitMiddleware(api, d.Config.Server.AuthRateLimitPerMinute))
-	api.UseMiddleware(httpapi.AuthMiddleware(api, d.Sessions, d.Tokens))
+	api.UseMiddleware(httpapi.RateLimitMiddleware(api, d.Config.Server.AuthRateLimitPerMinute, d.Config.Server.ClientIPHeader))
+	api.UseMiddleware(httpapi.AuthMiddleware(api, d.Pool, d.Sessions, d.Tokens))
 
 	registerVersion(api, d.BuildVersion, d.BuildCommit)
 	d.Auth.Register(api)

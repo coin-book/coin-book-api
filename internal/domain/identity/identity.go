@@ -9,8 +9,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
+
+	"coin-book-api/internal/platform/db"
 )
 
 const MinPasswordLength = 10
@@ -20,7 +21,8 @@ const RefreshCookieName = "coinbook_refresh"
 var (
 	ErrInvalidCredentials = eris.New("identity: invalid credentials")
 	ErrPasswordTooShort   = eris.New("identity: password too short")
-	ErrAlreadySetUp       = eris.New("identity: the user already exists")
+	ErrEmailTaken         = eris.New("identity: a user with this email already exists")
+	ErrEmailNotVerified   = eris.New("identity: the provider has not verified this email")
 	ErrInvalidToken       = eris.New("identity: invalid session token")
 )
 
@@ -37,6 +39,13 @@ type User struct {
 	CreatedAt time.Time
 }
 
+// ExternalIdentity is what a sign-in provider vouches for.
+type ExternalIdentity struct {
+	Subject       string
+	Email         string
+	EmailVerified bool
+}
+
 type Claims struct {
 	jwt.RegisteredClaims
 	UserID    uuid.UUID `json:"uid"`
@@ -44,25 +53,17 @@ type Claims struct {
 }
 
 type Service struct {
-	pool       *pgxpool.Pool
+	pool       *db.Pool
 	secret     []byte
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 }
 
-func NewService(pool *pgxpool.Pool, secret string, accessTTL, refreshTTL time.Duration) *Service {
+func NewService(pool *db.Pool, secret string, accessTTL, refreshTTL time.Duration) *Service {
 	return &Service{pool: pool, secret: []byte(secret), accessTTL: accessTTL, refreshTTL: refreshTTL}
 }
 
-func (s *Service) NeedsSetup(ctx context.Context) (bool, error) {
-	var exists bool
-	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM app_user)`).Scan(&exists)
-	return !exists, eris.Wrap(err, "check user exists")
-}
-
-// Setup creates the only user. Afterwards it refuses, so the endpoint cannot be
-// used to take over an installation.
-func (s *Service) Setup(ctx context.Context, email, password string) (*User, error) {
+func (s *Service) Register(ctx context.Context, email, password string) (*User, error) {
 	email = normalizeEmail(email)
 	if !strings.Contains(email, "@") {
 		return nil, ErrInvalidCredentials
@@ -75,12 +76,10 @@ func (s *Service) Setup(ctx context.Context, email, password string) (*User, err
 		return nil, err
 	}
 	u := &User{Email: email}
-	err = s.pool.QueryRow(ctx, `
-		INSERT INTO app_user (email, password_hash)
-		SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM app_user)
-		RETURNING id, created_at`, email, hash).Scan(&u.ID, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrAlreadySetUp
+	err = s.pool.QueryRow(ctx, `INSERT INTO app_user (email, password_hash) VALUES ($1, $2) RETURNING id, created_at`,
+		email, hash).Scan(&u.ID, &u.CreatedAt)
+	if db.IsUniqueViolation(err) {
+		return nil, ErrEmailTaken
 	}
 	if err != nil {
 		return nil, eris.Wrap(err, "create user")
@@ -90,7 +89,7 @@ func (s *Service) Setup(ctx context.Context, email, password string) (*User, err
 
 func (s *Service) Login(ctx context.Context, email, password string) (*User, error) {
 	u := &User{}
-	var hash string
+	var hash *string
 	err := s.pool.QueryRow(ctx, `SELECT id, email, created_at, password_hash FROM app_user WHERE email = $1`,
 		normalizeEmail(email)).Scan(&u.ID, &u.Email, &u.CreatedAt, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -100,8 +99,46 @@ func (s *Service) Login(ctx context.Context, email, password string) (*User, err
 	if err != nil {
 		return nil, eris.Wrap(err, "find user")
 	}
-	if !verifyPassword(hash, password) {
+	// A user created through Google has no password: fail the same way as a wrong one.
+	if hash == nil {
+		verifyPassword(dummyHash, password)
 		return nil, ErrInvalidCredentials
+	}
+	if !verifyPassword(*hash, password) {
+		return nil, ErrInvalidCredentials
+	}
+	return u, nil
+}
+
+// SignInWithGoogle returns the user already linked to the Google account, or creates
+// one. It never attaches the account to an existing password user: registration does
+// not verify emails, so that user could be anyone who typed the address first.
+func (s *Service) SignInWithGoogle(ctx context.Context, id ExternalIdentity) (*User, error) {
+	u := &User{}
+	err := s.pool.QueryRow(ctx, `SELECT id, email, created_at FROM app_user WHERE google_sub = $1`, id.Subject).
+		Scan(&u.ID, &u.Email, &u.CreatedAt)
+	if err == nil {
+		return u, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, eris.Wrap(err, "find user by google account")
+	}
+	email := normalizeEmail(id.Email)
+	if !id.EmailVerified || !strings.Contains(email, "@") {
+		return nil, ErrEmailNotVerified
+	}
+	err = s.pool.QueryRow(ctx, `INSERT INTO app_user (email, google_sub) VALUES ($1, $2) RETURNING id, email, created_at`,
+		email, id.Subject).Scan(&u.ID, &u.Email, &u.CreatedAt)
+	if db.IsUniqueViolation(err) {
+		// Two callbacks for one new account can race: the loser finds the winner's row.
+		if err := s.pool.QueryRow(ctx, `SELECT id, email, created_at FROM app_user WHERE google_sub = $1`, id.Subject).
+			Scan(&u.ID, &u.Email, &u.CreatedAt); err == nil {
+			return u, nil
+		}
+		return nil, ErrEmailTaken
+	}
+	if err != nil {
+		return nil, eris.Wrap(err, "create user from google account")
 	}
 	return u, nil
 }

@@ -14,6 +14,7 @@ import (
 
 	"coin-book-api/internal/domain/agentaccess"
 	"coin-book-api/internal/domain/identity"
+	"coin-book-api/internal/platform/db"
 	"coin-book-api/internal/transport/http/apierr"
 )
 
@@ -105,8 +106,9 @@ func authOf(op *huma.Operation) (Auth, agentaccess.Scope) {
 	return level, scope
 }
 
-// AuthMiddleware enforces the declared tier and audits every agent-token request (F-AGT-2).
-func AuthMiddleware(api huma.API, sessions *identity.Service, tokens *agentaccess.Repo) func(huma.Context, func(huma.Context)) {
+// AuthMiddleware enforces the declared tier, scopes the database connection to the
+// caller's user and audits every agent-token request (F-AGT-2).
+func AuthMiddleware(api huma.API, pool *db.Pool, sessions *identity.Service, tokens *agentaccess.Repo) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
 		level, scope := authOf(ctx.Operation())
 		if level == AuthNone {
@@ -124,7 +126,13 @@ func AuthMiddleware(api huma.API, sessions *identity.Service, tokens *agentacces
 				writeErr(api, ctx, apierr.Unauthorized())
 				return
 			}
-			next(huma.WithValue(ctx, ctxUserKey{}, claims.UserID))
+			scoped, release, err := scopeToUser(ctx, pool, claims.UserID)
+			if err != nil {
+				writeErr(api, ctx, apierr.Internal(ctx.Context(), err))
+				return
+			}
+			defer release()
+			next(scoped)
 			return
 		}
 
@@ -133,6 +141,13 @@ func AuthMiddleware(api huma.API, sessions *identity.Service, tokens *agentacces
 			writeErr(api, ctx, apierr.Unauthorized())
 			return
 		}
+		scoped, release, err := scopeToUser(ctx, pool, token.UserID)
+		if err != nil {
+			writeErr(api, ctx, apierr.Internal(ctx.Context(), err))
+			return
+		}
+		defer release()
+		ctx = scoped
 		var count *int
 		counter := 0
 		ctx = huma.WithValue(huma.WithValue(ctx, ctxTokenKey{}, token), ctxResultCountKey{}, &counter)
@@ -149,6 +164,14 @@ func AuthMiddleware(api huma.API, sessions *identity.Service, tokens *agentacces
 			slog.ErrorContext(ctx.Context(), "record agent access", "err", err)
 		}
 	}
+}
+
+func scopeToUser(ctx huma.Context, pool *db.Pool, userID uuid.UUID) (huma.Context, func(), error) {
+	scoped, release, err := pool.ScopeToUser(ctx.Context(), userID)
+	if err != nil {
+		return ctx, release, err
+	}
+	return huma.WithValue(huma.WithContext(ctx, scoped), ctxUserKey{}, userID), release, nil
 }
 
 func bearerToken(header string) (string, bool) {

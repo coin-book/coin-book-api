@@ -7,7 +7,6 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/platform/db"
@@ -20,10 +19,10 @@ var ErrInvalidThreshold = eris.New("settings: the threshold must be 0 (off) or b
 const minThreshold = 0.5
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
-func NewRepo(pool *pgxpool.Pool) *Repo { return &Repo{pool: pool} }
+func NewRepo(pool *db.Pool) *Repo { return &Repo{pool: pool} }
 
 // Threshold is the classifier confidence above which imports categorise on their own;
 // 0 means the classifier only suggests.
@@ -52,6 +51,6 @@ func (r *Repo) SetThreshold(ctx context.Context, threshold float64) error {
 		return eris.Wrap(err, "encode setting")
 	}
 	_, err = r.pool.Exec(ctx, `INSERT INTO app_setting (key, value) VALUES ($1, $2)
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, AutoCategorizeThreshold, raw)
+		ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, AutoCategorizeThreshold, raw)
 	return eris.Wrap(err, "write setting")
 }

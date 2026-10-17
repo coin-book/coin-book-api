@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/agentaccess"
@@ -22,6 +21,8 @@ import (
 	"coin-book-api/internal/domain/transfer"
 	"coin-book-api/internal/platform/clock"
 	"coin-book-api/internal/platform/config"
+	"coin-book-api/internal/platform/db"
+	"coin-book-api/internal/platform/googleauth"
 	httppkg "coin-book-api/internal/transport/http"
 	"coin-book-api/internal/transport/http/accounts"
 	"coin-book-api/internal/transport/http/agenttokens"
@@ -42,7 +43,7 @@ type Build struct {
 
 // New builds the API. A nil pool is allowed for generating the OpenAPI document,
 // which only needs the operations registered, never executed.
-func New(cfg *config.Config, pool *pgxpool.Pool, c clock.Clock, build Build) (http.Handler, huma.API) {
+func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) (http.Handler, huma.API) {
 	sessions := identity.NewService(pool, cfg.JWT.Secret,
 		time.Duration(cfg.JWT.AccessTokenMinutes)*time.Minute, time.Duration(cfg.JWT.RefreshTokenHours)*time.Hour)
 	tokens := agentaccess.NewRepo(pool)
@@ -55,11 +56,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, c clock.Clock, build Build) (ht
 	categorizer := categorization.NewService(pool, categoryRepo, settingsRepo)
 	transferService := transfer.NewService(pool, categorizer)
 	importer := importing.NewService(pool, accountRepo, categorizer, transferService, cfg.Storage.ImportsDir)
+	google := googleauth.New(cfg.Google, cfg.Server.PublicURL+auth.GoogleCallbackPath)
 
 	return httppkg.NewAPI(httppkg.Deps{
-		Config: cfg, Sessions: sessions, Tokens: tokens,
+		Config: cfg, Pool: pool, Sessions: sessions, Tokens: tokens,
 		BuildVersion: build.Version, BuildCommit: build.Commit,
-		Auth:         auth.NewHandler(sessions, cfg.Server.CookieSecure),
+		Auth:         auth.NewHandler(sessions, google, cfg.Server),
 		Accounts:     accounts.NewHandler(accountRepo, bank.NewRepo(pool), transferService, pool),
 		Transactions: transactions.NewHandler(transactionRepo, categorizer),
 		Imports:      imports.NewHandler(importer, cfg.Server.MaxUploadBytes()),

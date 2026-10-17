@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/platform/db"
@@ -72,10 +71,10 @@ func CanonicalNumber(number string) string {
 }
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool *db.Pool
 }
 
-func NewRepo(pool *pgxpool.Pool) *Repo { return &Repo{pool: pool} }
+func NewRepo(pool *db.Pool) *Repo { return &Repo{pool: pool} }
 
 func (r *Repo) List(ctx context.Context) ([]Bank, error) {
 	rows, err := r.pool.Query(ctx, `SELECT id, country, code, name, short_name, bic FROM bank

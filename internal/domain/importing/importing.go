@@ -17,7 +17,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/domain/account"
@@ -55,14 +54,14 @@ type TransferMatcher interface {
 }
 
 type Service struct {
-	pool        *pgxpool.Pool
+	pool        *db.Pool
 	accounts    *account.Repo
 	categorizer Categorizer
 	transfers   TransferMatcher
 	importsDir  string
 }
 
-func NewService(pool *pgxpool.Pool, accounts *account.Repo, categorizer Categorizer, transfers TransferMatcher, importsDir string) *Service {
+func NewService(pool *db.Pool, accounts *account.Repo, categorizer Categorizer, transfers TransferMatcher, importsDir string) *Service {
 	return &Service{pool: pool, accounts: accounts, categorizer: categorizer, transfers: transfers, importsDir: importsDir}
 }
 
@@ -149,8 +148,14 @@ func (s *Service) Preview(ctx context.Context, fileName string, content []byte, 
 // unless force is set, which is recorded on the batch.
 func (s *Service) Commit(ctx context.Context, fileName string, content []byte, mapping Mapping, force bool) (*Result, error) {
 	var result *Result
-	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('coinbook.import'))`); err != nil {
+	sum := sha256.Sum256(content)
+	pending, err := s.stageOriginal(content)
+	if err != nil {
+		return nil, err
+	}
+	err = db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		// One import at a time per user; other users' imports are unaffected.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('coinbook.import'), hashtext(current_user_id()::text))`); err != nil {
 			return eris.Wrap(err, "lock imports")
 		}
 		p, err := s.plan(ctx, tx, fileName, content, mapping)
@@ -172,9 +177,10 @@ func (s *Service) Commit(ctx context.Context, fileName string, content []byte, m
 		return s.write(ctx, tx, p, force)
 	})
 	if err != nil {
+		_ = os.Remove(pending)
 		return result, err
 	}
-	return result, nil
+	return result, s.keepOriginal(pending, hex.EncodeToString(sum[:]))
 }
 
 func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, content []byte, mapping Mapping) (*plan, error) {
@@ -187,6 +193,10 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 		return nil, eris.Wrapf(ErrUnsupportedFormat, "%s: %v", parser.Format(), err)
 	}
 
+	owner, err := currentUser(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	sum := sha256.Sum256(content)
 	p := &plan{st: st, content: content, result: &Result{
 		FileName: filepath.Base(fileName), FileHash: hex.EncodeToString(sum[:]),
@@ -220,7 +230,7 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 		}
 		p.result.ChecksPassed = p.result.ChecksPassed && allPassed(ar.Checks)
 		p.result.Accounts = append(p.result.Accounts, ar)
-		for j, id := range transactionIDs(acc, r.idIdentity) {
+		for j, id := range transactionIDs(acc, owner, r.idIdentity) {
 			p.rows = append(p.rows, plannedRow{id: id, account: index, row: acc.Rows[j]})
 		}
 	}
@@ -263,14 +273,28 @@ func detect(content []byte) statement.Parser {
 	return best
 }
 
+// currentUser is the user the connection is scoped to; an import outside a user's
+// scope must not happen, so a missing one is an error rather than a shared id space.
+func currentUser(ctx context.Context, q db.Querier) (string, error) {
+	var owner *string
+	if err := q.QueryRow(ctx, `SELECT current_user_id()::text`).Scan(&owner); err != nil {
+		return "", eris.Wrap(err, "read current user")
+	}
+	if owner == nil {
+		return "", eris.New("importing: no user scope on the connection")
+	}
+	return *owner, nil
+}
+
 // transactionIDs derives deterministic ids: the same row in a re-imported or
 // overlapping export always hashes to the same id (F-IMP-2). Identical rows on one
-// account are told apart by their order of occurrence.
-func transactionIDs(acc *statement.Account, identity string) []string {
+// account are told apart by their order of occurrence. The owner is part of the hash,
+// so two users importing the same bank account never collide.
+func transactionIDs(acc *statement.Account, owner, identity string) []string {
 	seen := map[string]int{}
 	ids := make([]string, len(acc.Rows))
 	for i, r := range acc.Rows {
-		key := identity + "|" + r.IdentityKey
+		key := owner + "|" + identity + "|" + r.IdentityKey
 		occurrence := seen[key]
 		seen[key]++
 		sum := sha256.Sum256([]byte(key + "|" + strconv.Itoa(occurrence)))
@@ -300,9 +324,6 @@ func existingIDs(ctx context.Context, q db.Querier, rows []plannedRow) (map[stri
 }
 
 func (s *Service) write(ctx context.Context, tx pgx.Tx, p *plan, forced bool) error {
-	if err := s.storeOriginal(p.result.FileHash, p.content); err != nil {
-		return err
-	}
 	accountIDs, err := s.ensureAccounts(ctx, tx, p)
 	if err != nil {
 		return err
@@ -325,6 +346,9 @@ func (s *Service) write(ctx context.Context, tx pgx.Tx, p *plan, forced bool) er
 
 	inserted, err := insertTransactions(ctx, tx, p, accountIDs, batchID)
 	if err != nil {
+		return err
+	}
+	if err := analyzeTransactions(ctx, tx); err != nil {
 		return err
 	}
 	hints := map[string]string{}
@@ -355,15 +379,46 @@ func (s *Service) write(ctx context.Context, tx pgx.Tx, p *plan, forced bool) er
 	return err
 }
 
-func (s *Service) storeOriginal(hash string, content []byte) error {
+// analyzeTransactions gives the planner statistics for the rows this transaction just
+// inserted: the matching that follows joins them with themselves, and with stale or
+// missing statistics the per-user policy looks like a one-row filter and the join loops
+// (seconds instead of milliseconds on 10 000 rows). ANALYZE's lock conflicts with itself
+// until commit, so imports by different users wait for each other for the duration of
+// an import; at household scale that is acceptable.
+func analyzeTransactions(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `ANALYZE transaction`)
+	return eris.Wrap(err, "analyze transactions")
+}
+
+// stageOriginal writes the upload to a file of its own before the transaction, so a
+// full disk fails the import rather than a committed import losing its original.
+func (s *Service) stageOriginal(content []byte) (string, error) {
 	if err := os.MkdirAll(s.importsDir, 0o700); err != nil {
-		return eris.Wrap(err, "create imports directory")
+		return "", eris.Wrap(err, "create imports directory")
 	}
-	path := filepath.Join(s.importsDir, hash)
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	f, err := os.CreateTemp(s.importsDir, ".upload-*")
+	if err != nil {
+		return "", eris.Wrap(err, "stage original file")
 	}
-	return eris.Wrap(os.WriteFile(path, content, 0o600), "store original file")
+	if _, err := f.Write(content); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", eris.Wrap(err, "stage original file")
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", eris.Wrap(err, "stage original file")
+	}
+	return f.Name(), nil
+}
+
+// keepOriginal moves the staged file under its content hash once the import is
+// committed; the same content from another user simply replaces an identical file.
+func (s *Service) keepOriginal(pending, hash string) error {
+	if err := os.Chmod(pending, 0o600); err != nil {
+		return eris.Wrap(err, "store original file")
+	}
+	return eris.Wrap(os.Rename(pending, filepath.Join(s.importsDir, hash)), "store original file")
 }
 
 func (s *Service) ensureAccounts(ctx context.Context, tx pgx.Tx, p *plan) ([]uuid.UUID, error) {
