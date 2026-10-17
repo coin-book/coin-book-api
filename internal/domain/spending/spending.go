@@ -92,3 +92,67 @@ func MonthStart(t time.Time) time.Time {
 func DaysIn(month time.Time) int {
 	return MonthStart(month).AddDate(0, 1, -1).Day()
 }
+
+// AccountTotal is one account's signed total per main category over a period.
+type AccountTotal struct {
+	AccountID      uuid.UUID
+	MainCategoryID *uuid.UUID
+	Kind           categorization.Kind
+	AmountMinor    int64
+}
+
+// ByAccount sums signed amounts per account and main category over [from, to), the
+// same way Totals does, for drawing where money came in and went out.
+func (r *Repo) ByAccount(ctx context.Context, from, to time.Time, currency money.Currency) ([]AccountTotal, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT t.account_id, m.id,
+			coalesce(m.kind, CASE WHEN t.amount_minor > 0 THEN 'income' ELSE 'expense' END),
+			sum(coalesce(ca.amount_minor, t.amount_minor))::bigint
+		FROM transaction t
+		LEFT JOIN category_assignment ca ON ca.transaction_id = t.id
+		LEFT JOIN any_category c ON c.id = ca.category_id
+		LEFT JOIN any_category m ON m.id = coalesce(c.parent_id, c.id)
+		WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
+		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
+		  AND coalesce(m.kind, '') <> 'transfer'
+		GROUP BY 1, 2, 3`, from, to, string(currency))
+	if err != nil {
+		return nil, eris.Wrap(err, "sum spending by account")
+	}
+	totals, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (AccountTotal, error) {
+		var t AccountTotal
+		err := row.Scan(&t.AccountID, &t.MainCategoryID, &t.Kind, &t.AmountMinor)
+		return t, err
+	})
+	return totals, eris.Wrap(err, "read spending by account")
+}
+
+// SavingTransfer is money moved from one own account into a saving account.
+type SavingTransfer struct {
+	FromAccountID uuid.UUID
+	ToAccountID   uuid.UUID
+	AmountMinor   int64
+}
+
+// SavingTransfers nets, per pair of accounts, what moved into saving accounts over
+// [from, to): the set-aside flows, with the account they left.
+func (r *Repo) SavingTransfers(ctx context.Context, from, to time.Time, currency money.Currency) ([]SavingTransfer, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT t.account_id, tl.counterpart_account_id, -sum(t.amount_minor)::bigint
+		FROM transfer_leg tl
+		JOIN transaction t ON t.id = tl.transaction_id
+		JOIN account a ON a.id = tl.counterpart_account_id
+		WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
+		  AND a.kind IN ('savings', 'pocket', 'fund', 'broker')
+		GROUP BY 1, 2 HAVING sum(t.amount_minor) < 0
+		ORDER BY 3 DESC`, from, to, string(currency))
+	if err != nil {
+		return nil, eris.Wrap(err, "sum saving transfers")
+	}
+	flows, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (SavingTransfer, error) {
+		var f SavingTransfer
+		err := row.Scan(&f.FromAccountID, &f.ToAccountID, &f.AmountMinor)
+		return f, err
+	})
+	return flows, eris.Wrap(err, "read saving transfers")
+}

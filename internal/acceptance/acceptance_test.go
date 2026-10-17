@@ -334,3 +334,61 @@ func TestSearchIgnoresDiacriticsAndFindsAmounts(t *testing.T) {
 	assert.Len(t, c.transactions("q=62000").Transactions, 1)
 	assert.Empty(t, c.transactions("q=1250").Transactions)
 }
+
+func TestFlowsReportDrawsIncomeThroughAccountsToSpendingAndSavings(t *testing.T) {
+	c := newClient(t)
+	c.upload("/api/v1/imports", "mbank.csv", mbankStatement(t, ownMBankAccount, octoberRows), http.StatusCreated, nil)
+	c.upload("/api/v1/imports", "revolut.csv", revolutStatement(100000, []row{{"2026-10-13", "Dobitie", "Dobiť účet", 500000}}), http.StatusCreated, nil)
+
+	var flows struct {
+		Nodes []struct {
+			Key  string `json:"key"`
+			Kind string `json:"kind"`
+		} `json:"nodes"`
+		Links []struct {
+			Source      string `json:"source"`
+			Target      string `json:"target"`
+			AmountMinor int64  `json:"amount_minor"`
+		} `json:"links"`
+	}
+	c.do(http.MethodGet, "/api/v1/reports/flows/2026-10", nil, http.StatusOK, &flows)
+	kinds := map[string]string{}
+	for _, n := range flows.Nodes {
+		kinds[n.Key] = n.Kind
+	}
+	var income, expense, saving int64
+	for _, l := range flows.Links {
+		require.Positive(t, l.AmountMinor)
+		switch {
+		case kinds[l.Source] == "income" && kinds[l.Target] == "account":
+			income += l.AmountMinor
+		case kinds[l.Source] == "account" && kinds[l.Target] == "expense":
+			expense += l.AmountMinor
+		case kinds[l.Source] == "account" && kinds[l.Target] == "saving":
+			saving += l.AmountMinor
+		default:
+			t.Errorf("unexpected link %s -> %s", kinds[l.Source], kinds[l.Target])
+		}
+	}
+	assert.Equal(t, int64(6200000), income, "the salary flows into the mBank account")
+	assert.Equal(t, int64(124900+8900+30000), expense, "card payments flow out to categories; the Revolut top-up is a transfer, not spending")
+	assert.Zero(t, saving, "Revolut is a current account, so the top-up is not set-aside money")
+
+	var categories struct {
+		Months []struct {
+			Month    string `json:"month"`
+			Expenses []struct {
+				AmountMinor int64 `json:"amount_minor"`
+			} `json:"expenses"`
+		} `json:"months"`
+	}
+	c.do(http.MethodGet, "/api/v1/reports/categories?to=2026-10&months=3", nil, http.StatusOK, &categories)
+	require.Len(t, categories.Months, 3)
+	assert.Equal(t, "2026-08", categories.Months[0].Month)
+	assert.Empty(t, categories.Months[0].Expenses)
+	var october int64
+	for _, e := range categories.Months[2].Expenses {
+		october += e.AmountMinor
+	}
+	assert.Equal(t, int64(124900+8900+30000), october)
+}

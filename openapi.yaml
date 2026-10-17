@@ -348,6 +348,20 @@ components:
         - days_left
         - per_day_minor
       type: object
+    CategoriesReport:
+      additionalProperties: false
+      properties:
+        currency:
+          type: string
+        months:
+          description: Oldest first.
+          items:
+            $ref: "#/components/schemas/CategoryMonth"
+          type: array
+      required:
+        - currency
+        - months
+      type: object
     CategorizeInputBody:
       additionalProperties: false
       properties:
@@ -442,6 +456,20 @@ components:
       required:
         - category_id
         - amount_minor
+      type: object
+    CategoryMonth:
+      additionalProperties: false
+      properties:
+        expenses:
+          description: Per main category, largest first; empty for a month without spending.
+          items:
+            $ref: "#/components/schemas/CategoryTotal"
+          type: array
+        month:
+          type: string
+      required:
+        - month
+        - expenses
       type: object
     CategoryTotal:
       additionalProperties: false
@@ -638,6 +666,69 @@ components:
           type: string
         value:
           description: The value at the given location
+      type: object
+    FlowLink:
+      additionalProperties: false
+      properties:
+        amount_minor:
+          description: Always positive.
+          format: int64
+          type: integer
+        source:
+          description: Node key.
+          type: string
+        target:
+          description: Node key.
+          type: string
+      required:
+        - source
+        - target
+        - amount_minor
+      type: object
+    FlowNode:
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        category_id:
+          type: string
+        key:
+          description: Stable id to reference from links.
+          type: string
+        kind:
+          description: "income/expense/financial: a main category (category_id absent = not yet categorised); account: an own account; saving: a saving account money went into."
+          enum:
+            - income
+            - account
+            - expense
+            - financial
+            - saving
+          type: string
+      required:
+        - key
+        - kind
+      type: object
+    FlowsReport:
+      additionalProperties: false
+      properties:
+        currency:
+          type: string
+        links:
+          description: Largest first. Income categories flow into accounts; accounts flow into spending categories and saving accounts.
+          items:
+            $ref: "#/components/schemas/FlowLink"
+          type: array
+        month:
+          type: string
+        nodes:
+          items:
+            $ref: "#/components/schemas/FlowNode"
+          type: array
+      required:
+        - month
+        - currency
+        - nodes
+        - links
       type: object
     ImportAccount:
       additionalProperties: false
@@ -3029,6 +3120,131 @@ paths:
       summary: The signed-in user
       tags:
         - Auth
+  /api/v1/reports/categories:
+    get:
+      description: Agent tokens need the `reports:read` scope.
+      operationId: get-categories-report
+      parameters:
+        - description: Last month of the range.
+          explode: false
+          in: query
+          name: to
+          required: true
+          schema:
+            description: Last month of the range.
+            pattern: ^[0-9]{4}-[0-9]{2}$
+            type: string
+        - explode: false
+          in: query
+          name: months
+          schema:
+            default: 12
+            format: int64
+            maximum: 36
+            minimum: 1
+            type: integer
+        - explode: false
+          in: query
+          name: currency
+          schema:
+            default: CZK
+            pattern: ^[A-Z]{3}$
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoriesReport"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Spending per main category for each of the last months
+      tags:
+        - Reports
+  /api/v1/reports/flows/{month}:
+    get:
+      description: |-
+        Income categories flow into accounts; accounts flow into spending categories and saving accounts. Transfers between own accounts are not spending, only those into saving accounts appear, as set-aside money.
+
+        Agent tokens need the `reports:read` scope.
+      operationId: get-flows-report
+      parameters:
+        - in: path
+          name: month
+          required: true
+          schema:
+            examples:
+              - 2026-10
+            pattern: ^[0-9]{4}-[0-9]{2}$
+            type: string
+        - explode: false
+          in: query
+          name: currency
+          schema:
+            default: CZK
+            pattern: ^[A-Z]{3}$
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowsReport"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Where the month's money came from and went, as a flow graph
+      tags:
+        - Reports
   /api/v1/reports/monthly/{month}:
     get:
       description: |-
@@ -3085,7 +3301,7 @@ paths:
           description: Internal Server Error
       security:
         - bearerAuth: []
-      summary: Income and spending by category for a month, with a six-month trend
+      summary: Income and spending by category for a month, with a twelve-month trend
       tags:
         - Reports
   /api/v1/rules:
