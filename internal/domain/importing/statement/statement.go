@@ -44,12 +44,17 @@ type AccountRef struct {
 }
 
 // Identity matches account.Account.Identity, so a statement account and a stored
-// one derive the same transaction ids.
+// one derive the same transaction ids. Empty means the file does not say which
+// account it is, and the user has to map it.
 func (r AccountRef) Identity() string {
-	if r.AccountNumber != nil {
+	switch {
+	case r.AccountNumber != nil:
 		return *r.AccountNumber
+	case r.ExternalRef != nil:
+		return *r.ExternalRef
+	default:
+		return ""
 	}
-	return *r.ExternalRef
 }
 
 type Account struct {
@@ -81,6 +86,8 @@ type Row struct {
 	SpecificSymbol      string
 	BankCategory        string
 	BalanceAfterMinor   *int64
+	// CategoryHint is a category code or name the file itself assigns; empty when it has none.
+	CategoryHint string
 	// IdentityKey is what the transaction id is hashed from, together with the account
 	// and the row's occurrence among identical keys. Fixed per parser version.
 	IdentityKey string

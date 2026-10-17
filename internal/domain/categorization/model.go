@@ -22,6 +22,8 @@ const (
 	SourceRule   Source = "rule"
 	SourceManual Source = "manual"
 	SourceBank   Source = "bank"
+	// SourceModel is the learned classifier's guess above the auto threshold, awaiting confirmation.
+	SourceModel Source = "model"
 )
 
 var (
@@ -30,6 +32,10 @@ var (
 	ErrSplitMismatch    = eris.New("categorization: split lines do not add up to the transaction amount")
 	ErrNoLines          = eris.New("categorization: at least one category line is required")
 	ErrNothingToMatch   = eris.New("categorization: the transaction has no value the rule could match on")
+	ErrInvalidParent    = eris.New("categorization: a subcategory belongs under a main category other than itself")
+	ErrInvalidMerge     = eris.New("categorization: a category cannot be merged into itself or its own subcategory")
+	ErrCategoryInUse    = eris.New("categorization: the category is in use; choose a category to move its data to")
+	ErrSystemCategory   = eris.New("categorization: a system category can only change its look")
 )
 
 type Category struct {
@@ -43,6 +49,8 @@ type Category struct {
 	Icon          *string
 	BudgetGroupID *uuid.UUID
 	Sort          int
+	// Custom marks the user's own category; system categories keep their name, kind and place.
+	Custom bool
 }
 
 type BudgetGroup struct {
@@ -75,6 +83,8 @@ type Candidate struct {
 	OperationType       string
 	VariableSymbol      string
 	BankCategory        string
+	// CategoryHint is a category code or name the imported file assigned itself.
+	CategoryHint string
 }
 
 type Line struct {

@@ -15,20 +15,37 @@ var ErrTransactionNotFound = eris.New("categorization: transaction not found")
 
 const (
 	defaultRulePriority = 100
-	suggestionLimit     = 3
 	quickPickLimit      = 9
 )
 
 type Service struct {
-	pool *pgxpool.Pool
-	repo *Repo
+	pool       *pgxpool.Pool
+	repo       *Repo
+	thresholds Thresholds
+	learner    learner
 }
 
-func NewService(pool *pgxpool.Pool, repo *Repo) *Service { return &Service{pool: pool, repo: repo} }
+func NewService(pool *pgxpool.Pool, repo *Repo, thresholds Thresholds) *Service {
+	return &Service{pool: pool, repo: repo, thresholds: thresholds}
+}
 
 type AutoStats struct {
-	ByRule int
-	ByBank int
+	ByFile  int
+	ByRule  int
+	ByBank  int
+	ByModel int
+}
+
+// hinted resolves a category the file named itself; the user chose it, so it wins over rules.
+func hinted(hint string, byCode, byName map[string]uuid.UUID) (uuid.UUID, bool) {
+	if hint == "" {
+		return uuid.Nil, false
+	}
+	if id, ok := byCode[hint]; ok {
+		return id, true
+	}
+	id, ok := byName[normalize(hint)]
+	return id, ok
 }
 
 // CategorizeNew assigns freshly imported transactions by rule, falling back to the
@@ -43,14 +60,33 @@ func (s *Service) CategorizeNew(ctx context.Context, q db.Querier, candidates []
 		return AutoStats{}, err
 	}
 	byCode := make(map[string]uuid.UUID, len(cats))
+	byName := make(map[string]uuid.UUID, 2*len(cats))
 	for _, c := range cats {
 		byCode[c.Code] = c.ID
+		byName[normalize(c.NameCS)] = c.ID
+		byName[normalize(c.NameSK)] = c.ID
+	}
+
+	threshold, err := s.thresholds.Threshold(ctx, q)
+	if err != nil {
+		return AutoStats{}, err
+	}
+	var model *Classifier
+	if threshold > 0 {
+		if model, err = s.Model(ctx); err != nil {
+			return AutoStats{}, err
+		}
 	}
 
 	matcher := NewMatcher(rules)
 	var stats AutoStats
 	assignments := make([]newAssignment, 0, len(candidates))
 	for _, c := range candidates {
+		if id, ok := hinted(c.CategoryHint, byCode, byName); ok {
+			assignments = append(assignments, newAssignment{c.TransactionID, id, c.AmountMinor, SourceManual, nil})
+			stats.ByFile++
+			continue
+		}
 		if rule := matcher.Match(c); rule != nil {
 			ruleID := rule.ID
 			assignments = append(assignments, newAssignment{c.TransactionID, rule.CategoryID, c.AmountMinor, SourceRule, &ruleID})
@@ -60,6 +96,14 @@ func (s *Service) CategorizeNew(ctx context.Context, q db.Querier, candidates []
 		if id, ok := byCode[bankCategoryHints[c.BankCategory]]; ok {
 			assignments = append(assignments, newAssignment{c.TransactionID, id, c.AmountMinor, SourceBank, nil})
 			stats.ByBank++
+			continue
+		}
+		if model == nil {
+			continue
+		}
+		if p := model.Predict(c, 1); len(p) == 1 && p[0].Confidence >= threshold {
+			assignments = append(assignments, newAssignment{c.TransactionID, p[0].CategoryID, c.AmountMinor, SourceModel, nil})
+			stats.ByModel++
 		}
 	}
 	if len(assignments) == 0 {
@@ -79,6 +123,8 @@ const (
 type AssignResult struct {
 	Rule           *Rule
 	AppliedToOther int
+	// SuggestedRule is offered when no rule was saved but the choice keeps repeating.
+	SuggestedRule *RuleSuggestion
 }
 
 // Assign records a manual categorisation, optionally turning it into a rule that
@@ -96,8 +142,12 @@ func (s *Service) Assign(ctx context.Context, transactionID string, lines []Line
 		if err := s.replace(ctx, tx, transactionID, lines); err != nil {
 			return err
 		}
-		if saveRule == nil || len(lines) != 1 {
+		if len(lines) != 1 {
 			return nil
+		}
+		if saveRule == nil {
+			result.SuggestedRule, err = s.ruleSuggestion(ctx, tx, *c, lines[0].CategoryID)
+			return err
 		}
 		rule, err := ruleFrom(*c, lines[0].CategoryID, *saveRule)
 		if err != nil {
@@ -117,7 +167,7 @@ func (s *Service) Assign(ctx context.Context, transactionID string, lines []Line
 }
 
 func (s *Service) replace(ctx context.Context, q db.Querier, transactionID string, lines []Line) error {
-	if err := s.repo.deleteAssignments(ctx, q, []string{transactionID}, []Source{SourceRule, SourceManual, SourceBank}); err != nil {
+	if err := s.repo.deleteAssignments(ctx, q, []string{transactionID}, []Source{SourceRule, SourceManual, SourceBank, SourceModel}); err != nil {
 		return err
 	}
 	assignments := make([]newAssignment, len(lines))
@@ -146,7 +196,7 @@ func (s *Service) applyRule(ctx context.Context, q db.Querier, rule Rule, except
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	if err := s.repo.deleteAssignments(ctx, q, ids, []Source{SourceBank}); err != nil {
+	if err := s.repo.deleteAssignments(ctx, q, ids, []Source{SourceBank, SourceModel}); err != nil {
 		return 0, err
 	}
 	return len(ids), s.repo.insertAssignments(ctx, q, assignments)
@@ -189,7 +239,7 @@ func validateLines(amount int64, lines []Line) error {
 type Triage struct {
 	TransactionID string
 	Remaining     int
-	Suggested     []Suggestion
+	Suggested     []Prediction
 	QuickPicks    []Suggestion
 }
 
@@ -208,11 +258,11 @@ func (s *Service) NextForTriage(ctx context.Context, remaining int, skip []strin
 		return nil, err
 	}
 	t := &Triage{TransactionID: id, Remaining: remaining}
-	if c.Counterparty != "" {
-		if t.Suggested, err = s.repo.suggestionsFor(ctx, c.Counterparty, suggestionLimit); err != nil {
-			return nil, err
-		}
+	model, err := s.Model(ctx)
+	if err != nil {
+		return nil, err
 	}
+	t.Suggested = model.Predict(*c, suggestionCount)
 	t.QuickPicks, err = s.repo.recentlyUsed(ctx, quickPickLimit)
 	return t, err
 }
@@ -223,7 +273,7 @@ func (s *Service) ClearAutomatic(ctx context.Context, q db.Querier, transactionI
 	if len(transactionIDs) == 0 {
 		return nil
 	}
-	return s.repo.deleteAssignments(ctx, q, transactionIDs, []Source{SourceRule, SourceBank})
+	return s.repo.deleteAssignments(ctx, q, transactionIDs, []Source{SourceRule, SourceBank, SourceModel})
 }
 
 func mapMissingCategory(err error) error {

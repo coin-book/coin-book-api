@@ -170,6 +170,9 @@ func (s *Service) insert(ctx context.Context, q db.Querier, pairs []Pair, by Mat
 		}
 		ids = append(ids, p.OutTxID, p.InTxID)
 	}
+	if _, err := q.Exec(ctx, `DELETE FROM own_transfer WHERE transaction_id = ANY($1)`, ids); err != nil {
+		return eris.Wrap(err, "replace one-leg transfers with the pair")
+	}
 	return s.categorizer.ClearAutomatic(ctx, q, ids)
 }
 
@@ -205,17 +208,6 @@ func (s *Service) Pair(ctx context.Context, outTxID, inTxID string) error {
 		}
 		return s.insert(ctx, tx, []Pair{{OutTxID: outTxID, InTxID: inTxID}}, Manual)
 	})
-}
-
-func (s *Service) Unpair(ctx context.Context, transactionID string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM transfer_pair WHERE out_tx_id = $1 OR in_tx_id = $1`, transactionID)
-	if err != nil {
-		return eris.Wrap(err, "delete transfer pair")
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotPaired
-	}
-	return nil
 }
 
 type Listed struct {

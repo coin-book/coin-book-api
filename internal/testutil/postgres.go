@@ -72,7 +72,7 @@ func NewPostgres(ctx context.Context) (*Postgres, error) {
 	return pg, nil
 }
 
-// TruncateAll empties every table except the seeded taxonomy.
+// TruncateAll empties every table except the seeded reference data (taxonomy, bank register).
 func (pg *Postgres) TruncateAll(t *testing.T) {
 	t.Helper()
 	if _, err := pg.Pool.Exec(context.Background(), pg.truncate); err != nil {
@@ -94,7 +94,7 @@ func (pg *Postgres) Close(ctx context.Context) {
 func truncateStatement(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT tablename FROM pg_tables
-		WHERE schemaname = 'public' AND tablename NOT IN ('category', 'budget_group', 'schema_migrations')
+		WHERE schemaname = 'public' AND tablename NOT IN ('category', 'budget_group', 'bank', 'schema_migrations')
 		ORDER BY 1`)
 	if err != nil {
 		return "", eris.Wrap(err, "list tables")

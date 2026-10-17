@@ -220,7 +220,7 @@ func progress(month, today time.Time) (float64, int) {
 func (s *Service) lines(ctx context.Context, q db.Querier, month time.Time, currency money.Currency) ([]Line, error) {
 	rows, err := q.Query(ctx, `
 		SELECT b.category_id, b.budget_group_id, b.amount_minor FROM budget b
-		LEFT JOIN category c ON c.id = b.category_id LEFT JOIN budget_group g ON g.id = b.budget_group_id
+		LEFT JOIN any_category c ON c.id = b.category_id LEFT JOIN budget_group g ON g.id = b.budget_group_id
 		WHERE b.month = $1 AND b.currency = $2
 		ORDER BY coalesce(g.sort, 0), coalesce(c.sort, 0)`, month, string(currency))
 	if err != nil {
@@ -256,9 +256,11 @@ func (s *Service) Replace(ctx context.Context, month time.Time, currency money.C
 			return eris.Wrap(err, "clear budget")
 		}
 		for _, l := range lines {
-			_, err := tx.Exec(ctx, `INSERT INTO budget (month, category_id, budget_group_id, amount_minor, currency)
-				VALUES ($1, $2, $3, $4, $5)`, month, l.CategoryID, l.BudgetGroupID, l.PlannedMinor, string(currency))
-			if db.IsForeignKeyViolation(err) {
+			_, err := tx.Exec(ctx, `
+				INSERT INTO budget (month, system_category_id, user_category_id, budget_group_id, amount_minor, currency)
+				SELECT $1, (SELECT id FROM category WHERE id = $2), (SELECT id FROM user_category WHERE id = $2), $3, $4, $5`,
+				month, l.CategoryID, l.BudgetGroupID, l.PlannedMinor, string(currency))
+			if db.IsForeignKeyViolation(err) || db.IsCheckViolation(err) {
 				return ErrUnknownTarget
 			}
 			if err != nil {
@@ -274,8 +276,8 @@ func (s *Service) Replace(ctx context.Context, month time.Time, currency money.C
 func (s *Service) CopyPrevious(ctx context.Context, month time.Time, currency money.Currency) (int, error) {
 	month = spending.MonthStart(month)
 	tag, err := s.pool.Exec(ctx, `
-		INSERT INTO budget (month, category_id, budget_group_id, amount_minor, currency)
-		SELECT $1, category_id, budget_group_id, amount_minor, currency FROM budget
+		INSERT INTO budget (month, system_category_id, user_category_id, budget_group_id, amount_minor, currency)
+		SELECT $1, system_category_id, user_category_id, budget_group_id, amount_minor, currency FROM budget
 		WHERE month = $2 AND currency = $3
 		  AND NOT EXISTS (SELECT 1 FROM budget WHERE month = $1 AND currency = $3)`,
 		month, month.AddDate(0, -1, 0), string(currency))

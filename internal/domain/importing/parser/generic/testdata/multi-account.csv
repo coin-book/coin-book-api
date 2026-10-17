@@ -1,0 +1,4 @@
+date,amount,currency,description,account,id
+2026-10-01,-12.50,EUR,Coffee,Wise EUR,w-1
+2026-10-02,1250.00,EUR,Refund,Wise EUR,w-2
+2026-10-02,-300,CZK,Lunch,Hotovost,c-1

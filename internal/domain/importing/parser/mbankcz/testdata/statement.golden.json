@@ -29,6 +29,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Potraviny a drogerie",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-14|-1249,00 CZK|ROHLIK.CZ PLATBA KARTOU"
         },
         {
@@ -46,6 +47,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Restaurace",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-14|-89,00 CZK|KAVARNA U TESTU PLATBA KARTOU"
         },
         {
@@ -63,6 +65,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Bez kategorie - jiné",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-12|-5000,00 CZK|ODCHOZÍ OKAMŽITÁ PLATBA JAN TESTOVACI 000000 1234567890 0100"
         },
         {
@@ -80,6 +83,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Výplata",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-10|62000,00 CZK|VS:2026001 FIRMA TEST S.R.O. VYPLATA 09/2026 000019 2000000001 0800"
         },
         {
@@ -97,6 +101,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Převod mezi vlastními účty",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-10|-3000,00 CZK|VLASTNÍ PŘEVOD JAN TESTOVACI 000000 9999999999 2010 VS:42 KS:0308"
         },
         {
@@ -114,6 +119,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Vklady a spoření",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-08|-2000,00 CZK|PŘEVOD NA MSPOŘENÍ"
         },
         {
@@ -131,6 +137,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Potraviny a drogerie",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-08|-1249,00 CZK|ROHLIK.CZ PLATBA KARTOU"
         },
         {
@@ -148,6 +155,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Potraviny a drogerie",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-08|-1249,00 CZK|ROHLIK.CZ PLATBA KARTOU"
         },
         {
@@ -165,6 +173,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Pohonné hmoty",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-02|-1530,50 CZK|BENZINA TEST PLATBA NA INTERNETU"
         }
       ],

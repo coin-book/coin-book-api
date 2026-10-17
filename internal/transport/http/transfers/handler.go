@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/google/uuid"
 
 	"coin-book-api/internal/domain/agentaccess"
 	"coin-book-api/internal/domain/transfer"
@@ -57,7 +58,48 @@ type unpairInput struct {
 	TxID string `path:"tx_id" maxLength:"64" doc:"Either leg of the transfer."`
 }
 
+type markOwnInput struct {
+	TxID string `path:"tx_id" maxLength:"64"`
+	Body struct {
+		AccountID            uuid.UUID `json:"account_id" doc:"The own account the money went to or came from."`
+		RememberCounterparty bool      `json:"remember_counterparty,omitempty" doc:"Treat every payment with this counterparty the same way."`
+	}
+}
+
+type markOwnOutput struct {
+	Body struct {
+		AppliedToOther int `json:"applied_to_other"`
+	}
+}
+
+type OwnAccountCandidate struct {
+	AccountNumber string    `json:"account_number"`
+	BankID        string    `json:"bank_id,omitempty"`
+	Counterparty  string    `json:"counterparty,omitempty" doc:"The name the payments most often carry."`
+	Transactions  int       `json:"transactions"`
+	OutMinor      int64     `json:"out_minor" doc:"Sent to the account."`
+	InMinor       int64     `json:"in_minor" doc:"Received from the account."`
+	Currency      string    `json:"currency"`
+	LastBookedOn  time.Time `json:"last_booked_on" format:"date"`
+}
+
+type ownCandidatesOutput struct {
+	Body struct {
+		Candidates []OwnAccountCandidate `json:"candidates"`
+	}
+}
+
 func (h *Handler) Register(api huma.API) {
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "mark-own-transfer", Method: http.MethodPut, Path: "/api/v1/transfers/{tx_id}/own",
+		Tags: []string{"Transfers"}, Summary: "Mark a payment as a transfer to or from an own account",
+		Description: "For an account whose statement is not imported; the payment then counts as neither income nor expense.",
+		Errors:      []int{422},
+	}}, h.markOwn)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "list-own-account-candidates", Method: http.MethodGet, Path: "/api/v1/transfers/own-account-candidates",
+		Tags: []string{"Transfers"}, Summary: "Counterparty accounts the bank calls the client's own that coin-book does not know",
+	}}, h.ownCandidates)
 	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthRead, Scope: agentaccess.ScopeTransactionsRead, Operation: huma.Operation{
 		OperationID: "list-transfers", Method: http.MethodGet, Path: "/api/v1/transfers", Tags: []string{"Transfers"},
 		Summary: "Paired transfers between own accounts, newest first",
@@ -72,8 +114,35 @@ func (h *Handler) Register(api huma.API) {
 	}}, h.pair)
 	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
 		OperationID: "unpair-transfer", Method: http.MethodDelete, Path: "/api/v1/transfers/{tx_id}", Tags: []string{"Transfers"},
-		Summary: "Undo a transfer pairing", DefaultStatus: http.StatusNoContent, Errors: []int{404},
+		Summary: "Undo a transfer; a one-leg transfer is remembered as not a transfer", DefaultStatus: http.StatusNoContent, Errors: []int{404},
 	}}, h.unpair)
+}
+
+func (h *Handler) markOwn(ctx context.Context, in *markOwnInput) (*markOwnOutput, error) {
+	others, err := h.service.MarkOwn(ctx, in.TxID, in.Body.AccountID, in.Body.RememberCounterparty)
+	if errors.Is(err, transfer.ErrNotOwnAccount) {
+		return nil, apierr.Unprocessable(apierr.CodeNotOwnAccount)
+	}
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := &markOwnOutput{}
+	out.Body.AppliedToOther = others
+	return out, nil
+}
+
+func (h *Handler) ownCandidates(ctx context.Context, _ *struct{}) (*ownCandidatesOutput, error) {
+	candidates, err := h.service.OwnAccountCandidates(ctx)
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := &ownCandidatesOutput{}
+	out.Body.Candidates = make([]OwnAccountCandidate, len(candidates))
+	for i, c := range candidates {
+		out.Body.Candidates[i] = OwnAccountCandidate{AccountNumber: c.AccountNumber, BankID: c.BankID, Counterparty: c.Counterparty,
+			Transactions: c.Transactions, OutMinor: c.OutMinor, InMinor: c.InMinor, Currency: c.Currency, LastBookedOn: c.LastBookedOn}
+	}
+	return out, nil
 }
 
 func (h *Handler) list(ctx context.Context, _ *struct{}) (*listTransfersOutput, error) {

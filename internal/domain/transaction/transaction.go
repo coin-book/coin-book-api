@@ -47,7 +47,8 @@ type Assignment struct {
 }
 
 type Transfer struct {
-	CounterpartTxID      string    `json:"counterpart_tx_id"`
+	// CounterpartTxID is nil while the other account's statement is not imported.
+	CounterpartTxID      *string   `json:"counterpart_tx_id"`
 	CounterpartAccountID uuid.UUID `json:"counterpart_account_id"`
 	MatchedBy            string    `json:"matched_by"`
 }
@@ -65,8 +66,10 @@ type Filter struct {
 	CategoryID    *uuid.UUID
 	Query         string
 	Uncategorized bool
-	Cursor        string
-	Limit         int
+	// AutoAssigned keeps only transactions the classifier categorised, awaiting confirmation.
+	AutoAssigned bool
+	Cursor       string
+	Limit        int
 }
 
 type Page struct {
@@ -86,21 +89,22 @@ const listQuery = `
 		t.bank_category, t.balance_after_minor, t.import_batch_id, t.source_line,
 		coalesce((SELECT json_agg(json_build_object('category_id', ca.category_id, 'amount_minor', ca.amount_minor, 'source', ca.source))
 			FROM category_assignment ca WHERE ca.transaction_id = t.id), '[]'::json),
-		(SELECT json_build_object('counterpart_tx_id', o.id, 'counterpart_account_id', o.account_id, 'matched_by', tp.matched_by)
-			FROM transfer_pair tp JOIN transaction o ON o.id = CASE WHEN tp.out_tx_id = t.id THEN tp.in_tx_id ELSE tp.out_tx_id END
-			WHERE tp.out_tx_id = t.id OR tp.in_tx_id = t.id)
+		(SELECT json_build_object('counterpart_tx_id', tl.counterpart_tx_id, 'counterpart_account_id', tl.counterpart_account_id,
+			'matched_by', tl.matched_by)
+			FROM transfer_leg tl WHERE tl.transaction_id = t.id)
 	FROM transaction t
 	WHERE ($1::date IS NULL OR t.booked_on >= $1)
 	  AND ($2::date IS NULL OR t.booked_on <= $2)
 	  AND ($3::uuid IS NULL OR t.account_id = $3)
 	  AND ($4::uuid IS NULL OR EXISTS (
-		SELECT 1 FROM category_assignment ca JOIN category c ON c.id = ca.category_id
+		SELECT 1 FROM category_assignment ca JOIN any_category c ON c.id = ca.category_id
 		WHERE ca.transaction_id = t.id AND (c.id = $4 OR c.parent_id = $4)))
 	  AND ($5 = '' OR t.description ILIKE '%' || $5 || '%' OR t.counterparty ILIKE '%' || $5 || '%')
 	  AND (NOT $6 OR (NOT EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id)
-		AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = t.id OR tp.in_tx_id = t.id)))
+		AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)))
 	  AND ($7::date IS NULL OR (t.booked_on, t.id) < ($7, $8))
 	  AND ($10::text IS NULL OR t.id = $10)
+	  AND (NOT $11 OR EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id AND ca.source = 'model'))
 	ORDER BY t.booked_on DESC, t.id DESC
 	LIMIT $9`
 
@@ -110,7 +114,7 @@ func (r *Repo) List(ctx context.Context, f Filter) (*Page, error) {
 		return nil, err
 	}
 	rows, err := r.pool.Query(ctx, listQuery, f.From, f.To, f.AccountID, f.CategoryID, escapeLike(f.Query),
-		f.Uncategorized, cursorDate, cursorID, f.Limit+1, nil)
+		f.Uncategorized, cursorDate, cursorID, f.Limit+1, nil, f.AutoAssigned)
 	if err != nil {
 		return nil, eris.Wrap(err, "list transactions")
 	}
@@ -128,7 +132,7 @@ func (r *Repo) List(ctx context.Context, f Filter) (*Page, error) {
 }
 
 func (r *Repo) Get(ctx context.Context, id string) (*Listed, error) {
-	rows, err := r.pool.Query(ctx, listQuery, nil, nil, nil, nil, "", false, nil, "", 1, id)
+	rows, err := r.pool.Query(ctx, listQuery, nil, nil, nil, nil, "", false, nil, "", 1, id, false)
 	if err != nil {
 		return nil, eris.Wrap(err, "get transaction")
 	}
@@ -147,7 +151,7 @@ func (r *Repo) CountUncategorized(ctx context.Context) (int, error) {
 	err := r.pool.QueryRow(ctx, `
 		SELECT count(*) FROM transaction t
 		WHERE NOT EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id)
-		  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = t.id OR tp.in_tx_id = t.id)`).Scan(&n)
+		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)`).Scan(&n)
 	return n, eris.Wrap(err, "count uncategorized")
 }
 

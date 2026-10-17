@@ -20,6 +20,7 @@ import (
 	"coin-book-api/internal/domain/categorization"
 	"coin-book-api/internal/domain/identity"
 	"coin-book-api/internal/domain/importing"
+	"coin-book-api/internal/domain/settings"
 	"coin-book-api/internal/domain/spending"
 	"coin-book-api/internal/domain/transfer"
 	"coin-book-api/internal/platform/clock"
@@ -49,7 +50,7 @@ func Demo(ctx context.Context, pool *pgxpool.Pool, importsDir string) error {
 	}
 
 	categoryRepo := categorization.NewRepo(pool)
-	categorizer := categorization.NewService(pool, categoryRepo)
+	categorizer := categorization.NewService(pool, categoryRepo, settings.NewRepo(pool))
 	importer := importing.NewService(pool, account.NewRepo(pool), categorizer, transfer.NewService(pool, categorizer), importsDir)
 
 	today := clock.Today(clock.System{})
@@ -61,7 +62,7 @@ func Demo(ctx context.Context, pool *pgxpool.Pool, importsDir string) error {
 		"demo-mbank.csv":   mbankCSV(mbank, from, today),
 		"demo-revolut.csv": revolutCSV(revolut),
 	} {
-		if _, err := importer.Commit(ctx, name, content, false); err != nil && !errors.Is(err, importing.ErrAlreadyImported) {
+		if _, err := importer.Commit(ctx, name, content, nil, false); err != nil && !errors.Is(err, importing.ErrAlreadyImported) {
 			return eris.Wrapf(err, "import %s", name)
 		}
 	}

@@ -24,6 +24,7 @@ Spec: `../technicka-specifikace.md`; bank formats: `../importer-formaty.md`.
 - Every write operation is `httpapi.AuthSession`; agent tokens only reach `AuthRead` operations with a scope.
 - Account numbers and messages go to logs only as `sensitive.AccountNumber` / `sensitive.MessageText`.
 - A parser change that alters `IdentityKey` changes transaction ids: bump the parser version and plan a migration.
+- Transaction ids hash the *bank* account's identity, never the target account's: remapping or merging accounts must not break dedupe (ADR 203).
 - Golden files: `go test ./internal/domain/importing/... -update`; fixtures are synthetic — real exports never enter the repo.
 - `testdata/format-vectors.json` must stay byte-identical with `coin-book-web/packages/core/src/format-vectors.json`.
 - Domain packages make no network calls (depguard); identifiers in English, UI copy lives in the web client.

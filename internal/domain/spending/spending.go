@@ -40,10 +40,10 @@ func (r *Repo) Totals(ctx context.Context, from, to time.Time, currency money.Cu
 			sum(coalesce(ca.amount_minor, t.amount_minor))::bigint
 		FROM transaction t
 		LEFT JOIN category_assignment ca ON ca.transaction_id = t.id
-		LEFT JOIN category c ON c.id = ca.category_id
-		LEFT JOIN category m ON m.id = coalesce(c.parent_id, c.id)
+		LEFT JOIN any_category c ON c.id = ca.category_id
+		LEFT JOIN any_category m ON m.id = coalesce(c.parent_id, c.id)
 		WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
-		  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = t.id OR tp.in_tx_id = t.id)
+		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
 		  AND coalesce(m.kind, '') <> 'transfer'
 		GROUP BY 1, 2, 3, 4`, from, to, string(currency))
 	if err != nil {
@@ -55,6 +55,34 @@ func (r *Repo) Totals(ctx context.Context, from, to time.Time, currency money.Cu
 		return t, err
 	})
 	return totals, eris.Wrap(err, "read spending")
+}
+
+type AccountFlow struct {
+	AccountID   uuid.UUID
+	AmountMinor int64
+}
+
+// SetAside nets, per saving account (savings, pocket, fund, broker), the transfers that
+// reached it over [from, to): what the user put aside rather than spent.
+func (r *Repo) SetAside(ctx context.Context, from, to time.Time, currency money.Currency) ([]AccountFlow, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT tl.counterpart_account_id, -sum(t.amount_minor)::bigint
+		FROM transfer_leg tl
+		JOIN transaction t ON t.id = tl.transaction_id
+		JOIN account a ON a.id = tl.counterpart_account_id
+		WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
+		  AND a.kind IN ('savings', 'pocket', 'fund', 'broker')
+		GROUP BY 1 HAVING sum(t.amount_minor) <> 0
+		ORDER BY 2 DESC`, from, to, string(currency))
+	if err != nil {
+		return nil, eris.Wrap(err, "sum set-aside money")
+	}
+	flows, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (AccountFlow, error) {
+		var f AccountFlow
+		err := row.Scan(&f.AccountID, &f.AmountMinor)
+		return f, err
+	})
+	return flows, eris.Wrap(err, "read set-aside money")
 }
 
 func MonthStart(t time.Time) time.Time {

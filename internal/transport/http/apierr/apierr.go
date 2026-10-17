@@ -38,11 +38,21 @@ const (
 	CodeAlreadyImported   Code = "already_imported"
 	CodeAlreadyRolledBack Code = "already_rolled_back"
 	CodeFileTooLarge      Code = "file_too_large"
+	CodeMappingRequired   Code = "mapping_required"
+	CodeCurrencyMismatch  Code = "currency_mismatch"
+	CodeMergeIntoItself   Code = "merge_into_itself"
+	CodeAccountExists     Code = "account_exists"
+	CodeUnknownBank       Code = "unknown_bank"
 
 	CodeSplitMismatch  Code = "split_mismatch"
 	CodeNothingToMatch Code = "nothing_to_match"
 	CodeNotPairable    Code = "not_pairable"
 	CodeNotPaired      Code = "not_paired"
+	CodeInvalidParent  Code = "invalid_parent"
+	CodeInvalidMerge   Code = "invalid_merge"
+	CodeCategoryInUse  Code = "category_in_use"
+	CodeSystemCategory Code = "system_category"
+	CodeNotOwnAccount  Code = "not_own_account"
 
 	CodeInvalidBudgetLine   Code = "invalid_budget_line"
 	CodeDuplicateBudgetLine Code = "duplicate_budget_line"
@@ -72,10 +82,20 @@ var details = map[Code]string{ //nolint:gosec // G101: error descriptions, not c
 	CodeAlreadyImported:     "This file has already been imported.",
 	CodeAlreadyRolledBack:   "This import has already been rolled back.",
 	CodeFileTooLarge:        "The file exceeds the maximum upload size.",
+	CodeMappingRequired:     "The file does not say which account it belongs to; choose one in the mapping.",
+	CodeCurrencyMismatch:    "The accounts hold different currencies.",
+	CodeMergeIntoItself:     "An account cannot be merged into itself.",
+	CodeAccountExists:       "An account with this number already exists.",
+	CodeUnknownBank:         "That bank is not in the register.",
 	CodeSplitMismatch:       "The category lines do not add up to the transaction amount.",
 	CodeNothingToMatch:      "The transaction has no value a rule could match on.",
 	CodeNotPairable:         "These transactions cannot form a transfer.",
 	CodeNotPaired:           "The transaction is not part of a transfer.",
+	CodeInvalidParent:       "A subcategory must belong under a main category.",
+	CodeInvalidMerge:        "A category cannot be merged into itself or its own subcategory.",
+	CodeCategoryInUse:       "The category is in use; choose a category to merge it into.",
+	CodeNotOwnAccount:       "Choose another own account than the one the transaction belongs to.",
+	CodeSystemCategory:      "A system category keeps its name, kind and place; only its colour, icon and group can change.",
 	CodeInvalidBudgetLine:   "A budget line needs exactly one category or group and a non-negative amount.",
 	CodeDuplicateBudgetLine: "The same category or group is budgeted twice.",
 	CodeInvalidCurrency:     "That is not an ISO 4217 currency code.",

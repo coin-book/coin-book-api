@@ -40,8 +40,8 @@ func TestTransactionIDsDistinguishIdenticalRowsByOccurrence(t *testing.T) {
 		{IdentityKey: "same"}, {IdentityKey: "same"}, {IdentityKey: "other"},
 	}}
 
-	ids := transactionIDs(acc)
+	ids := transactionIDs(acc, ref)
 
 	assert.NotEqual(t, ids[0], ids[1])
-	assert.Equal(t, ids, transactionIDs(acc), "ids are deterministic")
+	assert.Equal(t, ids, transactionIDs(acc, ref), "ids are deterministic")
 }

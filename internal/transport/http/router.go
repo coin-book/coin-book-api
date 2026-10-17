@@ -25,6 +25,7 @@ import (
 	"coin-book-api/internal/transport/http/imports"
 	mw "coin-book-api/internal/transport/http/middleware"
 	"coin-book-api/internal/transport/http/reports"
+	settingshttp "coin-book-api/internal/transport/http/settings"
 	"coin-book-api/internal/transport/http/transactions"
 	"coin-book-api/internal/transport/http/transfers"
 )
@@ -50,6 +51,7 @@ type Deps struct {
 	Budgets      *budgets.Handler
 	Reports      *reports.Handler
 	AgentTokens  *agenttokens.Handler
+	Settings     *settingshttp.Handler
 }
 
 func NewAPI(d Deps) (http.Handler, huma.API) {
@@ -87,6 +89,7 @@ func NewAPI(d Deps) (http.Handler, huma.API) {
 	d.Budgets.Register(api)
 	d.Reports.Register(api)
 	d.AgentTokens.Register(api)
+	d.Settings.Register(api)
 	return r, api
 }
 

@@ -10,11 +10,13 @@ import (
 
 	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/agentaccess"
+	"coin-book-api/internal/domain/bank"
 	"coin-book-api/internal/domain/budget"
 	"coin-book-api/internal/domain/categorization"
 	"coin-book-api/internal/domain/identity"
 	"coin-book-api/internal/domain/importing"
 	"coin-book-api/internal/domain/report"
+	"coin-book-api/internal/domain/settings"
 	"coin-book-api/internal/domain/spending"
 	"coin-book-api/internal/domain/transaction"
 	"coin-book-api/internal/domain/transfer"
@@ -28,6 +30,7 @@ import (
 	"coin-book-api/internal/transport/http/categories"
 	"coin-book-api/internal/transport/http/imports"
 	"coin-book-api/internal/transport/http/reports"
+	settingshttp "coin-book-api/internal/transport/http/settings"
 	"coin-book-api/internal/transport/http/transactions"
 	"coin-book-api/internal/transport/http/transfers"
 )
@@ -48,7 +51,8 @@ func New(cfg *config.Config, pool *pgxpool.Pool, c clock.Clock, build Build) (ht
 	categoryRepo := categorization.NewRepo(pool)
 	spendingRepo := spending.NewRepo(pool)
 
-	categorizer := categorization.NewService(pool, categoryRepo)
+	settingsRepo := settings.NewRepo(pool)
+	categorizer := categorization.NewService(pool, categoryRepo, settingsRepo)
 	transferService := transfer.NewService(pool, categorizer)
 	importer := importing.NewService(pool, accountRepo, categorizer, transferService, cfg.Storage.ImportsDir)
 
@@ -56,7 +60,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, c clock.Clock, build Build) (ht
 		Config: cfg, Sessions: sessions, Tokens: tokens,
 		BuildVersion: build.Version, BuildCommit: build.Commit,
 		Auth:         auth.NewHandler(sessions, cfg.Server.CookieSecure),
-		Accounts:     accounts.NewHandler(accountRepo),
+		Accounts:     accounts.NewHandler(accountRepo, bank.NewRepo(pool), transferService, pool),
 		Transactions: transactions.NewHandler(transactionRepo, categorizer),
 		Imports:      imports.NewHandler(importer, cfg.Server.MaxUploadBytes()),
 		Categories:   categories.NewHandler(categoryRepo),
@@ -64,5 +68,6 @@ func New(cfg *config.Config, pool *pgxpool.Pool, c clock.Clock, build Build) (ht
 		Budgets:      budgets.NewHandler(budget.NewService(pool, spendingRepo, categoryRepo, c)),
 		Reports:      reports.NewHandler(report.NewService(spendingRepo)),
 		AgentTokens:  agenttokens.NewHandler(tokens),
+		Settings:     settingshttp.NewHandler(settingsRepo, categorizer),
 	})
 }

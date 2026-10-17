@@ -1,0 +1,76 @@
+{
+  "Format": "coinbook-csv",
+  "Version": 1,
+  "PeriodFrom": "2026-10-15T00:00:00Z",
+  "PeriodTo": "2026-10-16T00:00:00Z",
+  "Accounts": [
+    {
+      "Ref": {
+        "Institution": "other",
+        "Kind": "current",
+        "Currency": "CZK",
+        "AccountNumber": null,
+        "ExternalRef": null,
+        "Name": ""
+      },
+      "Rows": [
+        {
+          "Line": 2,
+          "BookedOn": "2026-10-15T00:00:00Z",
+          "AmountMinor": -124950,
+          "FeeMinor": 0,
+          "Description": "Nakup potravin",
+          "Counterparty": "ROHLIK.CZ",
+          "CounterpartyAccount": "",
+          "OperationType": "",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": 1000050,
+          "CategoryHint": "Potraviny",
+          "IdentityKey": "2026-10-15|-124950|Nakup potravin|ROHLIK.CZ"
+        },
+        {
+          "Line": 3,
+          "BookedOn": "2026-10-16T00:00:00Z",
+          "AmountMinor": 6200000,
+          "FeeMinor": 0,
+          "Description": "Vyplata",
+          "Counterparty": "FIRMA TEST",
+          "CounterpartyAccount": "",
+          "OperationType": "",
+          "Message": "",
+          "VariableSymbol": "2026001",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": 7200050,
+          "CategoryHint": "income.salary",
+          "IdentityKey": "2026-10-16|6200000|Vyplata|FIRMA TEST"
+        },
+        {
+          "Line": 4,
+          "BookedOn": "2026-10-16T00:00:00Z",
+          "AmountMinor": -8900,
+          "FeeMinor": 0,
+          "Description": "Kava",
+          "Counterparty": "",
+          "CounterpartyAccount": "",
+          "OperationType": "",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": 7191150,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-16|-8900|Kava|"
+        }
+      ],
+      "Totals": null,
+      "DeclaredSum": null
+    }
+  ]
+}

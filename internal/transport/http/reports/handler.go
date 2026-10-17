@@ -43,6 +43,12 @@ type MonthlyReport struct {
 	Expenses []CategoryTotal `json:"expenses" doc:"Per main category, largest first."`
 	Income   []CategoryTotal `json:"income"`
 	Trend    []MonthTotals   `json:"trend" doc:"The last six months, oldest first."`
+	SetAside []AccountFlow   `json:"set_aside" doc:"Transfers into saving accounts (savings, pocket, fund, broker), net per account."`
+}
+
+type AccountFlow struct {
+	AccountID   uuid.UUID `json:"account_id"`
+	AmountMinor int64     `json:"amount_minor" doc:"Positive: put aside; negative: taken back."`
 }
 
 type monthlyReportOutput struct {
@@ -71,7 +77,10 @@ func (h *Handler) monthly(ctx context.Context, in *monthInput) (*monthlyReportOu
 		return nil, apierr.Internal(ctx, err)
 	}
 	out := MonthlyReport{MonthTotals: toTotals(m.MonthTotals), Currency: string(m.Currency),
-		Expenses: toCategoryTotals(m.Expenses), Income: toCategoryTotals(m.Income)}
+		Expenses: toCategoryTotals(m.Expenses), Income: toCategoryTotals(m.Income), SetAside: []AccountFlow{}}
+	for _, f := range m.SetAside {
+		out.SetAside = append(out.SetAside, AccountFlow{AccountID: f.AccountID, AmountMinor: f.AmountMinor})
+	}
 	for _, t := range m.Trend {
 		out.Trend = append(out.Trend, toTotals(t))
 	}

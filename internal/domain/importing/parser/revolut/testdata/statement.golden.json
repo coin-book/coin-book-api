@@ -29,6 +29,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Dobiť účet",
           "BalanceAfterMinor": 1500000,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-02|500000|Dobitie z účtu Test|1500000"
         },
         {
@@ -46,6 +47,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Predajca",
           "BalanceAfterMinor": 1475010,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-05|-24990|Testovací obchod|1475010"
         },
         {
@@ -63,6 +65,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Zameniť",
           "BalanceAfterMinor": 1225010,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-12|-250000|Zamenené na EUR|1225010"
         },
         {
@@ -80,6 +83,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Predajca",
           "BalanceAfterMinor": 1200020,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-12|-24990|Testovací obchod|1200020"
         }
       ],
@@ -111,6 +115,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Zameniť",
           "BalanceAfterMinor": 13000,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-12|10000|Zamenené z CZK|13000"
         },
         {
@@ -128,6 +133,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Predajca",
           "BalanceAfterMinor": 12650,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-13|-350|Kavárna Testova|12650"
         },
         {
@@ -145,6 +151,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Iné",
           "BalanceAfterMinor": 10000,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-14|-2650|Na účet EUR Flexibilné peňažné fondy|10000"
         }
       ],
@@ -176,6 +183,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Výnos fondu",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-15|1|Interest earned - Flexibilné peňažné fondy"
         },
         {
@@ -193,6 +201,7 @@
           "SpecificSymbol": "",
           "BankCategory": "Výnos fondu",
           "BalanceAfterMinor": null,
+          "CategoryHint": "",
           "IdentityKey": "2026-10-16|1|Interest earned - Flexibilné peňažné fondy"
         }
       ],

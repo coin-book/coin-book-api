@@ -34,13 +34,13 @@ func NewHandler(repo *transaction.Repo, categorizer *categorization.Service) *Ha
 type Assignment struct {
 	CategoryID  uuid.UUID `json:"category_id"`
 	AmountMinor int64     `json:"amount_minor"`
-	Source      string    `json:"source" enum:"rule,manual,bank"`
+	Source      string    `json:"source" enum:"rule,manual,bank,model" doc:"model: the learned classifier chose it; confirm or change it."`
 }
 
 type Transfer struct {
-	CounterpartTxID      string    `json:"counterpart_tx_id"`
+	CounterpartTxID      *string   `json:"counterpart_tx_id,omitempty" doc:"Absent while the other account's statement is not imported."`
 	CounterpartAccountID uuid.UUID `json:"counterpart_account_id"`
-	MatchedBy            string    `json:"matched_by" enum:"auto,manual"`
+	MatchedBy            string    `json:"matched_by" enum:"auto,manual,number,counterparty" doc:"number and counterparty: recognised as a transfer to an own account."`
 }
 
 type Transaction struct {
@@ -63,6 +63,13 @@ type Transaction struct {
 	SourceLine          int          `json:"source_line" doc:"Line in the imported file (F-IMP-6)."`
 	Categories          []Assignment `json:"categories"`
 	Transfer            *Transfer    `json:"transfer,omitempty" doc:"Set when this is one leg of a transfer between own accounts."`
+	Suggestions         []Prediction `json:"suggestions,omitempty" doc:"Learned category suggestions; only on uncategorised transactions in lists."`
+}
+
+type Prediction struct {
+	CategoryID uuid.UUID `json:"category_id"`
+	Confidence float64   `json:"confidence" minimum:"0" maximum:"1"`
+	Reasons    []string  `json:"reasons" doc:"Words of the transaction that point at this category."`
 }
 
 type listTransactionsInput struct {
@@ -72,6 +79,7 @@ type listTransactionsInput struct {
 	CategoryID    uuid.UUID `query:"category_id" doc:"Matches the category and its subcategories."`
 	Query         string    `query:"q" maxLength:"100" doc:"Substring of the description or counterparty."`
 	Uncategorized bool      `query:"uncategorized" doc:"Only transactions with no category that are not transfers."`
+	AutoAssigned  bool      `query:"auto" doc:"Only transactions the classifier categorised, awaiting confirmation."`
 	Cursor        string    `query:"cursor"`
 	Limit         int       `query:"limit" minimum:"1" maximum:"200" default:"50"`
 }
@@ -106,9 +114,26 @@ type categorizeInput struct {
 
 type categorizeOutput struct {
 	Body struct {
-		Transaction    Transaction `json:"transaction"`
-		RuleID         *uuid.UUID  `json:"rule_id,omitempty"`
-		AppliedToOther int         `json:"applied_to_other" doc:"Other transactions the new rule categorised."`
+		Transaction    Transaction    `json:"transaction"`
+		RuleID         *uuid.UUID     `json:"rule_id,omitempty"`
+		AppliedToOther int            `json:"applied_to_other" doc:"Other transactions the new rule categorised."`
+		SuggestedRule  *SuggestedRule `json:"suggested_rule,omitempty" doc:"Offered when the same choice for this counterparty keeps repeating."`
+	}
+}
+
+type SuggestedRule struct {
+	Counterparty string    `json:"counterparty"`
+	CategoryID   uuid.UUID `json:"category_id"`
+	Times        int       `json:"times"`
+}
+
+type confirmInput struct {
+	ID string `path:"id" maxLength:"64"`
+}
+
+type confirmOutput struct {
+	Body struct {
+		Confirmed int `json:"confirmed"`
 	}
 }
 
@@ -125,7 +150,7 @@ type triageOutput struct {
 	Body struct {
 		Transaction *Transaction `json:"transaction,omitempty" doc:"Absent when nothing is left to categorise."`
 		Remaining   int          `json:"remaining"`
-		Suggested   []Suggestion `json:"suggested" doc:"Categories used before for the same counterparty."`
+		Suggested   []Prediction `json:"suggested" doc:"Learned suggestions, most likely first."`
 		QuickPicks  []Suggestion `json:"quick_picks" doc:"Most used categories lately, for the 1–9 keys."`
 	}
 }
@@ -145,6 +170,14 @@ func (h *Handler) Register(api huma.API) {
 		Errors: []int{404, 422},
 	}}, h.categorize)
 	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "confirm-transaction-category", Method: http.MethodPost, Path: "/api/v1/transactions/{id}/confirm",
+		Tags: []string{"Transactions"}, Summary: "Accept the category the classifier chose",
+	}}, h.confirm)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "confirm-all-automatic-categories", Method: http.MethodPost, Path: "/api/v1/transactions/confirm-automatic",
+		Tags: []string{"Transactions"}, Summary: "Accept every category the classifier chose",
+	}}, h.confirmAll)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
 		OperationID: "get-triage", Method: http.MethodGet, Path: "/api/v1/triage", Tags: []string{"Transactions"},
 		Summary: "The next uncategorised transaction with suggestions",
 	}}, h.triage)
@@ -159,7 +192,8 @@ func (h *Handler) list(ctx context.Context, in *listTransactionsInput) (*listTra
 	if err != nil {
 		return nil, err
 	}
-	f := transaction.Filter{From: from, To: to, Query: in.Query, Uncategorized: in.Uncategorized, Cursor: in.Cursor, Limit: in.Limit}
+	f := transaction.Filter{From: from, To: to, Query: in.Query, Uncategorized: in.Uncategorized, AutoAssigned: in.AutoAssigned,
+		Cursor: in.Cursor, Limit: in.Limit}
 	if f.Limit == 0 || f.Limit > maxPageSize {
 		f.Limit = defaultPageSize
 	}
@@ -176,10 +210,22 @@ func (h *Handler) list(ctx context.Context, in *listTransactionsInput) (*listTra
 	if err != nil {
 		return nil, apierr.Internal(ctx, err)
 	}
+	var uncategorized []string
+	for _, item := range page.Items {
+		if len(item.Assignments) == 0 && item.Transfer == nil {
+			uncategorized = append(uncategorized, item.ID)
+		}
+	}
+	suggestions, err := h.categorizer.Suggest(ctx, uncategorized)
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
 	out := &listTransactionsOutput{}
 	out.Body.Transactions = make([]Transaction, 0, len(page.Items))
 	for _, item := range page.Items {
-		out.Body.Transactions = append(out.Body.Transactions, ToDTO(item))
+		dto := ToDTO(item)
+		dto.Suggestions = predictions(suggestions[item.ID])
+		out.Body.Transactions = append(out.Body.Transactions, dto)
 	}
 	out.Body.NextCursor = page.NextCursor
 	httpapi.CountResults(ctx, len(page.Items))
@@ -240,6 +286,9 @@ func (h *Handler) categorize(ctx context.Context, in *categorizeInput) (*categor
 	if result.Rule != nil {
 		out.Body.RuleID = &result.Rule.ID
 	}
+	if r := result.SuggestedRule; r != nil {
+		out.Body.SuggestedRule = &SuggestedRule{Counterparty: r.Counterparty, CategoryID: r.CategoryID, Times: r.Times}
+	}
 	return out, nil
 }
 
@@ -254,13 +303,43 @@ func (h *Handler) triage(ctx context.Context, in *triageInput) (*triageOutput, e
 	}
 	out := &triageOutput{}
 	out.Body.Remaining = next.Remaining
-	out.Body.Suggested = suggestions(next.Suggested)
+	out.Body.Suggested = predictions(next.Suggested)
 	out.Body.QuickPicks = suggestions(next.QuickPicks)
 	if next.TransactionID != "" {
 		if out.Body.Transaction, err = h.load(ctx, next.TransactionID); err != nil {
 			return nil, err
 		}
 	}
+	return out, nil
+}
+
+func predictions(in []categorization.Prediction) []Prediction {
+	out := make([]Prediction, len(in))
+	for i, p := range in {
+		reasons := p.Reasons
+		if reasons == nil {
+			reasons = []string{}
+		}
+		out[i] = Prediction{CategoryID: p.CategoryID, Confidence: p.Confidence, Reasons: reasons}
+	}
+	return out
+}
+
+func (h *Handler) confirm(ctx context.Context, in *confirmInput) (*confirmOutput, error) {
+	return h.confirmIDs(ctx, []string{in.ID})
+}
+
+func (h *Handler) confirmAll(ctx context.Context, _ *struct{}) (*confirmOutput, error) {
+	return h.confirmIDs(ctx, nil)
+}
+
+func (h *Handler) confirmIDs(ctx context.Context, ids []string) (*confirmOutput, error) {
+	n, err := h.categorizer.Confirm(ctx, ids)
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := &confirmOutput{}
+	out.Body.Confirmed = n
 	return out, nil
 }
 

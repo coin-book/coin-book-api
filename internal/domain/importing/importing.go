@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ import (
 
 	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/categorization"
+	"coin-book-api/internal/domain/importing/parser/generic"
 	"coin-book-api/internal/domain/importing/parser/mbankcz"
 	"coin-book-api/internal/domain/importing/parser/revolut"
 	"coin-book-api/internal/domain/importing/statement"
@@ -41,7 +43,7 @@ var (
 )
 
 // parsers is the explicit registry; adding a bank means adding it here.
-var parsers = []statement.Parser{mbankcz.Parser{}, revolut.Parser{}}
+var parsers = []statement.Parser{mbankcz.Parser{}, revolut.Parser{}, generic.Parser{}}
 
 type Categorizer interface {
 	CategorizeNew(ctx context.Context, q db.Querier, candidates []categorization.Candidate) (categorization.AutoStats, error)
@@ -49,6 +51,7 @@ type Categorizer interface {
 
 type TransferMatcher interface {
 	AutoMatch(ctx context.Context, q db.Querier, transactionIDs []string) (int, error)
+	DetectOwn(ctx context.Context, q db.Querier, transactionIDs []string) (int, error)
 }
 
 type Service struct {
@@ -80,13 +83,20 @@ type PreviewRow struct {
 }
 
 type AccountResult struct {
-	Ref        statement.AccountRef
-	AccountID  *uuid.UUID
-	IsNew      bool
-	Rows       int
-	New        int
-	Duplicates int
-	Checks     []Check
+	// Key identifies this statement account in a Mapping.
+	Key       string
+	Ref       statement.AccountRef
+	AccountID *uuid.UUID
+	IsNew     bool
+	// NewAccount is what would be created when IsNew.
+	NewAccount *NewAccount
+	MatchedBy  MatchedBy
+	// NeedsMapping: the file names no account, so the user must confirm where it goes.
+	NeedsMapping bool
+	Rows         int
+	New          int
+	Duplicates   int
+	Checks       []Check
 }
 
 type Result struct {
@@ -103,9 +113,12 @@ type Result struct {
 	RowsTotal        int
 	RowsNew          int
 	RowsDuplicate    int
+	CategorizedFile  int
+	CategorizedModel int
 	CategorizedRule  int
 	CategorizedBank  int
 	TransfersMatched int
+	OwnTransfers     int
 }
 
 type plannedRow struct {
@@ -117,15 +130,15 @@ type plannedRow struct {
 type plan struct {
 	result   *Result
 	st       *statement.Statement
-	accounts []*statement.Account
-	existing []*account.Account
+	accounts []*resolved
 	rows     []plannedRow
 	content  []byte
 }
 
 // Preview runs the whole pipeline without writing anything (F-IMP-4 dry-run).
-func (s *Service) Preview(ctx context.Context, fileName string, content []byte) (*Result, error) {
-	p, err := s.plan(ctx, s.pool, fileName, content)
+// A nil mapping takes the suggested target for every account.
+func (s *Service) Preview(ctx context.Context, fileName string, content []byte, mapping Mapping) (*Result, error) {
+	p, err := s.plan(ctx, s.pool, fileName, content, mapping)
 	if err != nil {
 		return nil, err
 	}
@@ -134,19 +147,24 @@ func (s *Service) Preview(ctx context.Context, fileName string, content []byte) 
 
 // Commit writes the statement in one transaction. Failing control checks stop it
 // unless force is set, which is recorded on the batch.
-func (s *Service) Commit(ctx context.Context, fileName string, content []byte, force bool) (*Result, error) {
+func (s *Service) Commit(ctx context.Context, fileName string, content []byte, mapping Mapping, force bool) (*Result, error) {
 	var result *Result
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('coinbook.import'))`); err != nil {
 			return eris.Wrap(err, "lock imports")
 		}
-		p, err := s.plan(ctx, tx, fileName, content)
+		p, err := s.plan(ctx, tx, fileName, content, mapping)
 		if err != nil {
 			return err
 		}
 		result = p.result
 		if p.result.AlreadyImported {
 			return ErrAlreadyImported
+		}
+		for _, a := range p.result.Accounts {
+			if a.NeedsMapping {
+				return ErrMappingRequired
+			}
 		}
 		if !p.result.ChecksPassed && !force {
 			return ErrChecksFailed
@@ -159,7 +177,7 @@ func (s *Service) Commit(ctx context.Context, fileName string, content []byte, f
 	return result, nil
 }
 
-func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, content []byte) (*plan, error) {
+func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, content []byte, mapping Mapping) (*plan, error) {
 	parser := detect(content)
 	if parser == nil {
 		return nil, ErrUnsupportedFormat
@@ -179,26 +197,31 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 		return nil, eris.Wrap(err, "check previous import")
 	}
 
-	for _, acc := range st.Accounts {
+	defaultName := strings.TrimSuffix(p.result.FileName, filepath.Ext(p.result.FileName))
+	for i, acc := range st.Accounts {
 		if len(acc.Rows) == 0 {
 			continue
 		}
-		existing, err := s.accounts.FindByIdentity(ctx, q, acc.Ref.AccountNumber, acc.Ref.ExternalRef)
+		key := sourceKey(acc, i)
+		r, err := s.resolve(ctx, q, acc, key, mapping, defaultName)
 		if err != nil {
 			return nil, err
 		}
 		index := len(p.accounts)
-		p.accounts = append(p.accounts, acc)
-		p.existing = append(p.existing, existing)
+		p.accounts = append(p.accounts, r)
 
-		ar := AccountResult{Ref: acc.Ref, IsNew: existing == nil, Rows: len(acc.Rows), Checks: runChecks(acc)}
-		if existing != nil {
-			ar.AccountID = &existing.ID
+		ar := AccountResult{Key: key, Ref: acc.Ref, IsNew: r.create != nil, MatchedBy: r.matchedBy,
+			NeedsMapping: acc.Ref.Identity() == "" && r.matchedBy != MatchedByUser, Rows: len(acc.Rows), Checks: runChecks(acc)}
+		if r.existing != nil {
+			ar.AccountID = &r.existing.ID
+		}
+		if r.create != nil {
+			ar.NewAccount = &NewAccount{Name: r.create.Name, Kind: r.create.Kind, BankID: r.create.BankID}
 		}
 		p.result.ChecksPassed = p.result.ChecksPassed && allPassed(ar.Checks)
 		p.result.Accounts = append(p.result.Accounts, ar)
-		for i, id := range transactionIDs(acc) {
-			p.rows = append(p.rows, plannedRow{id: id, account: index, row: acc.Rows[i]})
+		for j, id := range transactionIDs(acc, r.idIdentity) {
+			p.rows = append(p.rows, plannedRow{id: id, account: index, row: acc.Rows[j]})
 		}
 	}
 
@@ -219,8 +242,8 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 		if len(p.result.Rows) < previewRowLimit {
 			acc := p.accounts[r.account]
 			p.result.Rows = append(p.result.Rows, PreviewRow{
-				AccountRef: acc.Ref.Identity(), Line: r.row.Line, BookedOn: r.row.BookedOn,
-				Amount: money.New(r.row.AmountMinor, acc.Ref.Currency), Description: r.row.Description, Status: status,
+				AccountRef: acc.key, Line: r.row.Line, BookedOn: r.row.BookedOn,
+				Amount: money.New(r.row.AmountMinor, acc.src.Ref.Currency), Description: r.row.Description, Status: status,
 			})
 		}
 	}
@@ -243,11 +266,11 @@ func detect(content []byte) statement.Parser {
 // transactionIDs derives deterministic ids: the same row in a re-imported or
 // overlapping export always hashes to the same id (F-IMP-2). Identical rows on one
 // account are told apart by their order of occurrence.
-func transactionIDs(acc *statement.Account) []string {
+func transactionIDs(acc *statement.Account, identity string) []string {
 	seen := map[string]int{}
 	ids := make([]string, len(acc.Rows))
 	for i, r := range acc.Rows {
-		key := acc.Ref.Identity() + "|" + r.IdentityKey
+		key := identity + "|" + r.IdentityKey
 		occurrence := seen[key]
 		seen[key]++
 		sum := sha256.Sum256([]byte(key + "|" + strconv.Itoa(occurrence)))
@@ -304,17 +327,31 @@ func (s *Service) write(ctx context.Context, tx pgx.Tx, p *plan, forced bool) er
 	if err != nil {
 		return err
 	}
+	hints := map[string]string{}
+	for _, r := range p.rows {
+		if r.row.CategoryHint != "" {
+			hints[r.id] = r.row.CategoryHint
+		}
+	}
+	for i := range inserted {
+		inserted[i].CategoryHint = hints[inserted[i].TransactionID]
+	}
 	stats, err := s.categorizer.CategorizeNew(ctx, tx, inserted)
 	if err != nil {
 		return err
 	}
-	p.result.CategorizedRule, p.result.CategorizedBank = stats.ByRule, stats.ByBank
+	p.result.CategorizedFile, p.result.CategorizedRule, p.result.CategorizedBank = stats.ByFile, stats.ByRule, stats.ByBank
+	p.result.CategorizedModel = stats.ByModel
 
 	ids := make([]string, len(inserted))
 	for i, c := range inserted {
 		ids[i] = c.TransactionID
 	}
-	p.result.TransfersMatched, err = s.transfers.AutoMatch(ctx, tx, ids)
+	if p.result.TransfersMatched, err = s.transfers.AutoMatch(ctx, tx, ids); err != nil {
+		return err
+	}
+	// Not only the new rows: an account this import created may be the target of older payments.
+	p.result.OwnTransfers, err = s.transfers.DetectOwn(ctx, tx, nil)
 	return err
 }
 
@@ -331,21 +368,19 @@ func (s *Service) storeOriginal(hash string, content []byte) error {
 
 func (s *Service) ensureAccounts(ctx context.Context, tx pgx.Tx, p *plan) ([]uuid.UUID, error) {
 	ids := make([]uuid.UUID, len(p.accounts))
-	for i, acc := range p.accounts {
-		if p.existing[i] != nil {
-			ids[i] = p.existing[i].ID
+	for i, r := range p.accounts {
+		if r.existing != nil {
+			ids[i] = r.existing.ID
+			if err := s.rememberAlias(ctx, tx, r, r.existing.ID); err != nil {
+				return nil, err
+			}
 			continue
 		}
-		created := &account.Account{
-			Name: acc.Ref.Name, Institution: acc.Ref.Institution, Kind: acc.Ref.Kind, Currency: acc.Ref.Currency,
-			AccountNumber: acc.Ref.AccountNumber, ExternalRef: acc.Ref.ExternalRef,
-			OpeningBalanceMinor: openingBalance(acc),
-		}
-		if err := s.accounts.Create(ctx, tx, created); err != nil {
+		if err := s.accounts.Create(ctx, tx, r.create); err != nil {
 			return nil, err
 		}
-		ids[i] = created.ID
-		p.result.Accounts[i].AccountID = &created.ID
+		ids[i] = r.create.ID
+		p.result.Accounts[i].AccountID = &r.create.ID
 	}
 	return ids, nil
 }
@@ -370,7 +405,7 @@ func insertTransactions(ctx context.Context, tx pgx.Tx, p *plan, accountIDs []uu
 	_, err := tx.CopyFrom(ctx, pgx.Identifier{"import_staging"}, columns, pgx.CopyFromSlice(len(p.rows), func(i int) ([]any, error) {
 		r := p.rows[i]
 		row := r.row
-		return []any{r.id, accountIDs[r.account], row.BookedOn, row.AmountMinor, string(p.accounts[r.account].Ref.Currency),
+		return []any{r.id, accountIDs[r.account], row.BookedOn, row.AmountMinor, string(p.accounts[r.account].src.Ref.Currency),
 			row.FeeMinor, row.Description, nullable(row.Counterparty), nullable(row.CounterpartyAccount),
 			nullable(row.OperationType), nullable(row.Message), nullable(row.VariableSymbol), nullable(row.ConstantSymbol),
 			nullable(row.SpecificSymbol), nullable(row.BankCategory), row.BalanceAfterMinor, batchID, row.Line}, nil

@@ -34,6 +34,8 @@ type Monthly struct {
 	Expenses []CategoryTotal
 	Income   []CategoryTotal
 	Trend    []MonthTotals
+	// SetAside is what transfers moved into saving accounts this month, net per account.
+	SetAside []spending.AccountFlow
 }
 
 type Service struct {
@@ -87,7 +89,11 @@ func (s *Service) Monthly(ctx context.Context, month time.Time, currency money.C
 		}
 	}
 
-	out := &Monthly{MonthTotals: *byMonth[month], Currency: currency}
+	setAside, err := s.spending.SetAside(ctx, month, month.AddDate(0, 1, 0), currency)
+	if err != nil {
+		return nil, err
+	}
+	out := &Monthly{MonthTotals: *byMonth[month], Currency: currency, SetAside: setAside}
 	out.Expenses = ranked(expenses, uncategorizedExpense)
 	out.Income = ranked(income, uncategorizedIncome)
 	for i := range trendMonths {

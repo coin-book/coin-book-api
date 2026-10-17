@@ -81,12 +81,23 @@ func (c *client) do(method, path string, body any, wantStatus int, out any) {
 
 func (c *client) upload(path, name string, content []byte, wantStatus int, out any) {
 	c.t.Helper()
+	c.uploadMapped(path, name, content, nil, wantStatus, out)
+}
+
+// uploadMapped sends the import with a mapping form field, keyed by accounts[].key.
+func (c *client) uploadMapped(path, name string, content []byte, mapping map[string]any, wantStatus int, out any) {
+	c.t.Helper()
 	var buf bytes.Buffer
 	form := multipart.NewWriter(&buf)
 	part, err := form.CreateFormFile("file", name)
 	require.NoError(c.t, err)
 	_, err = part.Write(content)
 	require.NoError(c.t, err)
+	if mapping != nil {
+		raw, err := json.Marshal(mapping)
+		require.NoError(c.t, err)
+		require.NoError(c.t, form.WriteField("mapping", string(raw)))
+	}
 	require.NoError(c.t, form.Close())
 	req, err := http.NewRequest(http.MethodPost, c.server.URL+path, &buf)
 	require.NoError(c.t, err)
@@ -168,16 +179,28 @@ func revolutStatement(openingMinor int64, rows []row) []byte {
 	return b.Bytes()
 }
 
+type importAccount struct {
+	Key          string  `json:"key"`
+	AccountID    *string `json:"account_id"`
+	IsNew        bool    `json:"is_new"`
+	MatchedBy    string  `json:"matched_by"`
+	NeedsMapping bool    `json:"needs_mapping"`
+	New          int     `json:"new"`
+	Duplicates   int     `json:"duplicates"`
+}
+
 type importResult struct {
-	BatchID          string `json:"batch_id"`
-	ChecksPassed     bool   `json:"checks_passed"`
-	AlreadyImported  bool   `json:"already_imported"`
-	RowsTotal        int    `json:"rows_total"`
-	RowsNew          int    `json:"rows_new"`
-	RowsDuplicate    int    `json:"rows_duplicate"`
-	TransfersMatched int    `json:"transfers_matched"`
-	CategorizedRule  int    `json:"categorized_by_rule"`
-	CategorizedBank  int    `json:"categorized_by_bank"`
+	Accounts         []importAccount `json:"accounts"`
+	CategorizedFile  int             `json:"categorized_by_file"`
+	BatchID          string          `json:"batch_id"`
+	ChecksPassed     bool            `json:"checks_passed"`
+	AlreadyImported  bool            `json:"already_imported"`
+	RowsTotal        int             `json:"rows_total"`
+	RowsNew          int             `json:"rows_new"`
+	RowsDuplicate    int             `json:"rows_duplicate"`
+	TransfersMatched int             `json:"transfers_matched"`
+	CategorizedRule  int             `json:"categorized_by_rule"`
+	CategorizedBank  int             `json:"categorized_by_bank"`
 }
 
 type transactionList struct {
