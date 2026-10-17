@@ -12,7 +12,7 @@ import (
 	"coin-book-api/internal/platform/money"
 )
 
-const trendMonths = 6
+const trendMonths = 12
 
 type CategoryTotal struct {
 	// CategoryID is nil for the not-yet-categorised share.

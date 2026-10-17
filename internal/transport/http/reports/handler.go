@@ -55,12 +55,118 @@ type monthlyReportOutput struct {
 	Body MonthlyReport
 }
 
+type FlowNode struct {
+	Key        string     `json:"key" doc:"Stable id to reference from links."`
+	Kind       string     `json:"kind" enum:"income,account,expense,financial,saving" doc:"income/expense/financial: a main category (category_id absent = not yet categorised); account: an own account; saving: a saving account money went into."`
+	CategoryID *uuid.UUID `json:"category_id,omitempty"`
+	AccountID  *uuid.UUID `json:"account_id,omitempty"`
+}
+
+type FlowLink struct {
+	Source      string `json:"source" doc:"Node key."`
+	Target      string `json:"target" doc:"Node key."`
+	AmountMinor int64  `json:"amount_minor" doc:"Always positive."`
+}
+
+type FlowsReport struct {
+	Month    string     `json:"month"`
+	Currency string     `json:"currency"`
+	Nodes    []FlowNode `json:"nodes"`
+	Links    []FlowLink `json:"links" doc:"Largest first. Income categories flow into accounts; accounts flow into spending categories and saving accounts."`
+}
+
+type flowsOutput struct {
+	Body FlowsReport
+}
+
+type categoriesInput struct {
+	To       string `query:"to" pattern:"^[0-9]{4}-[0-9]{2}$" required:"true" doc:"Last month of the range."`
+	Months   int    `query:"months" minimum:"1" maximum:"36" default:"12"`
+	Currency string `query:"currency" default:"CZK" pattern:"^[A-Z]{3}$"`
+}
+
+type CategoryMonth struct {
+	Month    string          `json:"month"`
+	Expenses []CategoryTotal `json:"expenses" doc:"Per main category, largest first; empty for a month without spending."`
+}
+
+type CategoriesReport struct {
+	Currency string          `json:"currency"`
+	Months   []CategoryMonth `json:"months" doc:"Oldest first."`
+}
+
+type categoriesOutput struct {
+	Body CategoriesReport
+}
+
 func (h *Handler) Register(api huma.API) {
 	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthRead, Scope: agentaccess.ScopeReportsRead, Operation: huma.Operation{
 		OperationID: "get-monthly-report", Method: http.MethodGet, Path: "/api/v1/reports/monthly/{month}",
-		Tags: []string{"Reports"}, Summary: "Income and spending by category for a month, with a six-month trend",
+		Tags: []string{"Reports"}, Summary: "Income and spending by category for a month, with a twelve-month trend",
 		Description: "Transfers between own accounts are excluded.", Errors: []int{422},
 	}}, h.monthly)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthRead, Scope: agentaccess.ScopeReportsRead, Operation: huma.Operation{
+		OperationID: "get-flows-report", Method: http.MethodGet, Path: "/api/v1/reports/flows/{month}",
+		Tags: []string{"Reports"}, Summary: "Where the month's money came from and went, as a flow graph",
+		Description: "Income categories flow into accounts; accounts flow into spending categories and saving accounts. " +
+			"Transfers between own accounts are not spending, only those into saving accounts appear, as set-aside money.",
+		Errors: []int{422},
+	}}, h.flows)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthRead, Scope: agentaccess.ScopeReportsRead, Operation: huma.Operation{
+		OperationID: "get-categories-report", Method: http.MethodGet, Path: "/api/v1/reports/categories",
+		Tags: []string{"Reports"}, Summary: "Spending per main category for each of the last months", Errors: []int{422},
+	}}, h.categories)
+}
+
+func (h *Handler) flows(ctx context.Context, in *monthInput) (*flowsOutput, error) {
+	month, err := dto.ParseMonth(in.Month)
+	if err != nil {
+		return nil, err
+	}
+	currency, err := dto.Currency(in.Currency)
+	if err != nil {
+		return nil, err
+	}
+	f, err := h.service.Flows(ctx, month, currency)
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := FlowsReport{Month: dto.Month(f.Month), Currency: string(f.Currency), Nodes: []FlowNode{}, Links: []FlowLink{}}
+	seen := map[string]bool{}
+	add := func(n report.Node) string {
+		key := n.Key()
+		if !seen[key] {
+			seen[key] = true
+			out.Nodes = append(out.Nodes, FlowNode{Key: key, Kind: string(n.Kind), CategoryID: n.CategoryID, AccountID: n.AccountID})
+		}
+		return key
+	}
+	for _, l := range f.Links {
+		out.Links = append(out.Links, FlowLink{Source: add(l.Source), Target: add(l.Target), AmountMinor: l.AmountMinor})
+	}
+	httpapi.CountResults(ctx, len(out.Links))
+	return &flowsOutput{Body: out}, nil
+}
+
+func (h *Handler) categories(ctx context.Context, in *categoriesInput) (*categoriesOutput, error) {
+	to, err := dto.ParseMonth(in.To)
+	if err != nil {
+		return nil, err
+	}
+	currency, err := dto.Currency(in.Currency)
+	if err != nil {
+		return nil, err
+	}
+	months, err := h.service.Categories(ctx, to, in.Months, currency)
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := CategoriesReport{Currency: string(currency), Months: make([]CategoryMonth, 0, len(months))}
+	for _, m := range months {
+		out.Months = append(out.Months, CategoryMonth{Month: dto.Month(m.Month), Expenses: toCategoryTotals(m.Totals)})
+	}
+	httpapi.CountResults(ctx, len(out.Months))
+	return &categoriesOutput{Body: out}, nil
 }
 
 func (h *Handler) monthly(ctx context.Context, in *monthInput) (*monthlyReportOutput, error) {
