@@ -99,7 +99,9 @@ const listQuery = `
 	  AND ($4::uuid IS NULL OR EXISTS (
 		SELECT 1 FROM category_assignment ca JOIN any_category c ON c.id = ca.category_id
 		WHERE ca.transaction_id = t.id AND (c.id = $4 OR c.parent_id = $4)))
-	  AND ($5 = '' OR t.description ILIKE '%' || $5 || '%' OR t.counterparty ILIKE '%' || $5 || '%')
+	  AND ($5 = '' OR unaccent(t.description) ILIKE '%' || unaccent($5) || '%'
+		OR unaccent(t.counterparty) ILIKE '%' || unaccent($5) || '%'
+		OR ($12::bigint IS NOT NULL AND CASE WHEN $13 THEN t.amount_minor = $12 ELSE abs(t.amount_minor) = $12 END))
 	  AND (NOT $6 OR (NOT EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id)
 		AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)))
 	  AND ($7::date IS NULL OR (t.booked_on, t.id) < ($7, $8))
@@ -113,8 +115,13 @@ func (r *Repo) List(ctx context.Context, f Filter) (*Page, error) {
 	if err != nil {
 		return nil, err
 	}
+	var amount *int64
+	minor, signed, isAmount := searchAmount(f.Query)
+	if isAmount {
+		amount = &minor
+	}
 	rows, err := r.pool.Query(ctx, listQuery, f.From, f.To, f.AccountID, f.CategoryID, escapeLike(f.Query),
-		f.Uncategorized, cursorDate, cursorID, f.Limit+1, nil, f.AutoAssigned)
+		f.Uncategorized, cursorDate, cursorID, f.Limit+1, nil, f.AutoAssigned, amount, signed)
 	if err != nil {
 		return nil, eris.Wrap(err, "list transactions")
 	}
@@ -132,7 +139,7 @@ func (r *Repo) List(ctx context.Context, f Filter) (*Page, error) {
 }
 
 func (r *Repo) Get(ctx context.Context, id string) (*Listed, error) {
-	rows, err := r.pool.Query(ctx, listQuery, nil, nil, nil, nil, "", false, nil, "", 1, id, false)
+	rows, err := r.pool.Query(ctx, listQuery, nil, nil, nil, nil, "", false, nil, "", 1, id, false, nil, false)
 	if err != nil {
 		return nil, eris.Wrap(err, "get transaction")
 	}

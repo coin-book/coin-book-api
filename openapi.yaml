@@ -3319,12 +3319,12 @@ paths:
           schema:
             description: Matches the category and its subcategories.
             type: string
-        - description: Substring of the description or counterparty.
+        - description: Substring of the description or counterparty, ignoring case and diacritics; or an amount such as 1249,50 (an explicit sign matches that direction only).
           explode: false
           in: query
           name: q
           schema:
-            description: Substring of the description or counterparty.
+            description: Substring of the description or counterparty, ignoring case and diacritics; or an amount such as 1249,50 (an explicit sign matches that direction only).
             maxLength: 100
             type: string
         - description: Only transactions with no category that are not transfers.

@@ -77,7 +77,7 @@ type listTransactionsInput struct {
 	To            string    `query:"to" format:"date"`
 	AccountID     uuid.UUID `query:"account_id"`
 	CategoryID    uuid.UUID `query:"category_id" doc:"Matches the category and its subcategories."`
-	Query         string    `query:"q" maxLength:"100" doc:"Substring of the description or counterparty."`
+	Query         string    `query:"q" maxLength:"100" doc:"Substring of the description or counterparty, ignoring case and diacritics; or an amount such as 1249,50 (an explicit sign matches that direction only)."`
 	Uncategorized bool      `query:"uncategorized" doc:"Only transactions with no category that are not transfers."`
 	AutoAssigned  bool      `query:"auto" doc:"Only transactions the classifier categorised, awaiting confirmation."`
 	Cursor        string    `query:"cursor"`

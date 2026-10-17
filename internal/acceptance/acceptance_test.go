@@ -316,3 +316,21 @@ func TestRealExportsImportCleanly(t *testing.T) {
 		assert.True(t, result.ChecksPassed)
 	}
 }
+
+func TestSearchIgnoresDiacriticsAndFindsAmounts(t *testing.T) {
+	c := newClient(t)
+	c.upload("/api/v1/imports", "mbank.csv", mbankStatement(t, ownMBankAccount, octoberRows), http.StatusCreated, nil)
+
+	byText := c.transactions("q=odchozi+okamzita").Transactions
+	require.Len(t, byText, 1)
+	withDiacritics := c.transactions("q=ODCHOZÍ+OKAMŽITÁ").Transactions
+	require.Len(t, withDiacritics, 1)
+	assert.Equal(t, withDiacritics[0].ID, byText[0].ID)
+
+	assert.Len(t, c.transactions("q=1249").Transactions, 1, "amount in major units")
+	assert.Len(t, c.transactions("q=1+249,00").Transactions, 1, "with group separator and decimals")
+	assert.Len(t, c.transactions("q=-1249").Transactions, 1, "an expense with an explicit minus")
+	assert.Empty(t, c.transactions("q=%2B1249").Transactions, "no income of that amount")
+	assert.Len(t, c.transactions("q=62000").Transactions, 1)
+	assert.Empty(t, c.transactions("q=1250").Transactions)
+}
