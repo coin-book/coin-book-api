@@ -464,8 +464,12 @@ func toResult(r *importing.Result) ImportResult {
 		if a.NewAccount != nil {
 			created = &NewAccount{Name: a.NewAccount.Name, Kind: string(a.NewAccount.Kind), BankID: a.NewAccount.BankID}
 		}
+		identity := a.Ref.Identity()
+		if generic.IsMappedRef(identity) {
+			identity = ""
+		}
 		out.Accounts[i] = ImportAccount{Key: a.Key, MatchedBy: string(a.MatchedBy), NeedsMapping: a.NeedsMapping,
-			NewAccount: created, Identity: a.Ref.Identity(), Name: a.Ref.Name, Currency: string(a.Ref.Currency),
+			NewAccount: created, Identity: identity, Name: a.Ref.Name, Currency: string(a.Ref.Currency),
 			AccountID: a.AccountID, IsNew: a.IsNew, Rows: a.Rows, New: a.New, Duplicates: a.Duplicates, Checks: checks}
 	}
 	for i, row := range r.Rows {

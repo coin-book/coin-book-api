@@ -257,12 +257,34 @@ func (s *Service) read(ctx context.Context, q db.Querier, u Upload) (*statement.
 	return st, nil, nil
 }
 
+// nameMappedAccounts names what a mapped file creates after its template, as the
+// file names no account itself; a file in several currencies gets one per currency.
+func nameMappedAccounts(st *statement.Statement, template *TemplateRef, u Upload) {
+	if st.Format != generic.MappedFormat {
+		return
+	}
+	name := strings.TrimSpace(u.SaveTemplateAs)
+	if template != nil {
+		name = template.Name
+	}
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(u.FileName), filepath.Ext(u.FileName))
+	}
+	for _, acc := range st.Accounts {
+		acc.Ref.Name = name
+		if len(st.Accounts) > 1 {
+			acc.Ref.Name += " " + string(acc.Ref.Currency)
+		}
+	}
+}
+
 func (s *Service) plan(ctx context.Context, q db.Querier, u Upload) (*plan, error) {
 	st, template, err := s.read(ctx, q, u)
 	if err != nil {
 		return nil, err
 	}
 	fileName, content, mapping := u.FileName, u.Content, u.Mapping
+	nameMappedAccounts(st, template, u)
 
 	owner, err := currentUser(ctx, q)
 	if err != nil {

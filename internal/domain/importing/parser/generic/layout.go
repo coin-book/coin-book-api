@@ -29,6 +29,10 @@ const mappedVersion = 1
 
 const mappedRefPrefix = "mapped:"
 
+// IsMappedRef tells an account reference the mapper made up from the column names,
+// which names no real account and means nothing to show.
+func IsMappedRef(ref string) bool { return strings.HasPrefix(ref, mappedRefPrefix) }
+
 type Field string
 
 const (
