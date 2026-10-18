@@ -32,9 +32,11 @@ const (
 	ScopeCategoriesRead   Scope = "categories:read"
 	ScopeBudgetsRead      Scope = "budgets:read"
 	ScopeReportsRead      Scope = "reports:read"
+	ScopeInvestmentsRead  Scope = "investments:read"
 )
 
-var AllScopes = []Scope{ScopeAccountsRead, ScopeTransactionsRead, ScopeCategoriesRead, ScopeBudgetsRead, ScopeReportsRead}
+var AllScopes = []Scope{ScopeAccountsRead, ScopeTransactionsRead, ScopeCategoriesRead, ScopeBudgetsRead, ScopeReportsRead,
+	ScopeInvestmentsRead}
 
 var (
 	ErrInvalidToken = eris.New("agentaccess: invalid token")

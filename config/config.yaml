@@ -41,3 +41,13 @@ storage:
 google:
   client_id: ""
   issuer_url: https://accounts.google.com
+
+# Daily prices from Yahoo and exchange rates from ČNB, fetched in the background (ADR 209).
+market:
+  enabled: true
+  yahoo_url: https://query1.finance.yahoo.com
+  cnb_url: https://www.cnb.cz/cs/financni-trhy/devizovy-trh/kurzy-devizoveho-trhu/kurzy-devizoveho-trhu/denni_kurz.txt
+  # A default HTTP-library agent gets throttled by Yahoo; a browser one is throttled hardest.
+  user_agent: coin-book/1.0 (price-refresh)
+  # Europe/Prague hour of the daily refresh, after the US close.
+  refresh_at_hour: 23

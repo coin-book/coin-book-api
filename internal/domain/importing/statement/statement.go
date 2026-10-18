@@ -5,6 +5,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/platform/money"
 )
@@ -64,6 +66,13 @@ type Account struct {
 	Totals *Totals
 	// DeclaredSum is the statement's sum of all movements; nil when the file has none.
 	DeclaredSum *int64
+	// Investments is set for a broker account (ADR 209).
+	Investments *Investments `json:",omitempty"`
+}
+
+// HasRecords tells whether the account carries anything to import.
+func (a *Account) HasRecords() bool {
+	return len(a.Rows) > 0 || (a.Investments != nil && a.Investments.Len() > 0)
 }
 
 type Totals struct {
@@ -91,4 +100,68 @@ type Row struct {
 	// IdentityKey is what the transaction id is hashed from, together with the account
 	// and the row's occurrence among identical keys. Fixed per parser version.
 	IdentityKey string
+}
+
+type Investments struct {
+	Buys      []Buy
+	Dividends []Dividend
+	LotSales  []LotSale
+}
+
+func (i *Investments) Len() int { return len(i.Buys) + len(i.Dividends) + len(i.LotSales) }
+
+// Security is an instrument as a statement names it; Ticker and Name may be empty.
+type Security struct {
+	ISIN   string
+	Ticker string
+	Name   string
+}
+
+// Fees and taxes are in CZK: a statement may charge them in another currency than the trade's.
+type Buy struct {
+	Line          int
+	TradedOn      time.Time
+	Security      Security
+	Quantity      decimal.Decimal
+	Currency      money.Currency
+	GrossMinor    int64
+	NetMinor      int64
+	GrossCZKMinor *int64
+	NetCZKMinor   *int64
+	FeeCZKMinor   int64
+	TaxCZKMinor   int64
+	IdentityKey   string
+}
+
+type Dividend struct {
+	Line          int
+	PaidOn        time.Time
+	Security      Security
+	Currency      money.Currency
+	GrossMinor    int64
+	NetMinor      int64
+	GrossCZKMinor *int64
+	NetCZKMinor   *int64
+	FeeCZKMinor   int64
+	TaxCZKMinor   int64
+	IdentityKey   string
+}
+
+// LotSale is one sold lot as the broker matched it to its purchase. Cost is positive.
+type LotSale struct {
+	Line             int
+	SoldOn           time.Time
+	BoughtOn         time.Time
+	Security         Security
+	Quantity         decimal.Decimal
+	Currency         money.Currency
+	ProceedsMinor    int64
+	CostMinor        int64
+	GainMinor        int64
+	ProceedsCZKMinor *int64
+	CostCZKMinor     *int64
+	GainCZKMinor     *int64
+	FeeCZKMinor      int64
+	TaxCZKMinor      int64
+	IdentityKey      string
 }

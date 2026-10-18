@@ -288,6 +288,12 @@ func (r *Repo) Merge(ctx context.Context, sourceID, targetID uuid.UUID) (int, er
 			return eris.Wrap(err, "move transactions")
 		}
 		moved = tag.RowsAffected()
+		if _, err := tx.Exec(ctx, `UPDATE investment_tx SET account_id = $2 WHERE account_id = $1`, sourceID, targetID); err != nil {
+			return eris.Wrap(err, "move investment transactions")
+		}
+		if _, err := tx.Exec(ctx, `UPDATE investment_lot_sale SET account_id = $2 WHERE account_id = $1`, sourceID, targetID); err != nil {
+			return eris.Wrap(err, "move sold lots")
+		}
 		// A transfer between the two accounts is now a move within one account: no longer a transfer.
 		if _, err := tx.Exec(ctx, `DELETE FROM transfer_pair tp USING transaction o, transaction i
 			WHERE tp.out_tx_id = o.id AND tp.in_tx_id = i.id AND o.account_id = i.account_id`); err != nil {

@@ -85,7 +85,8 @@ func TestEveryUserTableIsProtectedByRowSecurity(t *testing.T) {
 	rows, err := pg.Pool.Query(ctx, `
 		SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 		WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity)
-		  AND c.relname NOT IN ('app_user', 'category', 'budget_group', 'bank', 'agent_token', 'audit_log', 'schema_migrations')
+		  AND c.relname NOT IN ('app_user', 'category', 'budget_group', 'bank', 'agent_token', 'audit_log', 'schema_migrations',
+		    'instrument', 'price_series', 'price_bar', 'fx_rate')
 		ORDER BY 1`)
 	require.NoError(t, err)
 	unprotected, err := pgx.CollectRows(rows, pgx.RowTo[string])

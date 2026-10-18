@@ -18,6 +18,7 @@ import (
 	"golang.org/x/text/encoding/charmap"
 
 	"coin-book-api/internal/app"
+	"coin-book-api/internal/domain/investment"
 	"coin-book-api/internal/platform/clock"
 	"coin-book-api/internal/platform/config"
 	"coin-book-api/internal/testutil"
@@ -33,6 +34,7 @@ type client struct {
 	t      *testing.T
 	server *httptest.Server
 	token  string
+	prices *investment.Refresher
 }
 
 func newClient(t *testing.T) *client {
@@ -56,8 +58,8 @@ func newServer(t *testing.T, customize func(*config.Config)) *client {
 		customize(cfg)
 	}
 
-	handler, _ := app.New(cfg, pg.Pool, clock.Fixed{At: today}, app.Build{})
-	c := &client{t: t, server: httptest.NewServer(handler)}
+	application := app.New(cfg, pg.Pool, clock.Fixed{At: today}, app.Build{})
+	c := &client{t: t, server: httptest.NewServer(application.Handler), prices: application.Prices}
 	t.Cleanup(c.server.Close)
 	return c
 }
@@ -74,7 +76,7 @@ func (c *client) signUp(email string) *client {
 }
 
 func (c *client) withToken(token string) *client {
-	return &client{t: c.t, server: c.server, token: token}
+	return &client{t: c.t, server: c.server, token: token, prices: c.prices}
 }
 
 func (c *client) do(method, path string, body any, wantStatus int, out any) {

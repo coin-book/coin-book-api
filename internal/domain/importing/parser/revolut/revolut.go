@@ -20,7 +20,8 @@ import (
 
 const Format statement.Format = "revolut-consolidated-sk"
 
-const version = 1
+// version 2 reads the investment sections (ADR 209); transaction ids are unchanged.
+const version = 2
 
 const sectionEnd = "---------"
 
@@ -74,10 +75,11 @@ func (Parser) Detect(head []byte) statement.Confidence {
 }
 
 type parseState struct {
-	topSection string
-	current    *statement.Account
-	columns    columnSet
-	header     map[string]int
+	topSection  string
+	current     *statement.Account
+	columns     columnSet
+	header      map[string]int
+	investments investmentState
 }
 
 func (Parser) Parse(r io.Reader) (*statement.Statement, error) {
@@ -110,6 +112,9 @@ func (s *parseState) consume(st *statement.Statement, fields []string, line int)
 		s.enterTitle(st, title)
 		return nil
 	}
+	if s.topSection == investmentsSection {
+		return s.consumeInvestment(fields, line)
+	}
 	if s.current == nil || first == "" {
 		return nil
 	}
@@ -134,8 +139,12 @@ func (s *parseState) enterTitle(st *statement.Statement, title string) {
 	switch {
 	case title == sectionEnd:
 		s.current, s.header = nil, nil
+		s.investments.block = noBlock
 	case strings.HasSuffix(title, transactionSectionSuffix) || strings.HasSuffix(title, summarySectionSuffix):
 		s.topSection, s.current, s.header = title, nil, nil
+		s.investments = investmentState{}
+	case s.topSection == investmentsSection:
+		s.enterInvestmentTitle(st, title)
 	case s.topSection == currentAccountsSection && currentAccountTitle.MatchString(title):
 		s.open(st, currentAccountTitle.FindStringSubmatch(title)[1], account.Current, "personal", "Revolut ", currentAccountColumns)
 	case s.topSection == fundsSection && fundTitle.MatchString(title):
@@ -187,14 +196,14 @@ func (s *parseState) parseRow(fields []string, line int) (statement.Row, error) 
 		BankCategory:  bankCategory,
 		OperationType: operationTypes[bankCategory],
 	}
-	identity := []string{bookedOn.Format(time.DateOnly), strconv.FormatInt(amount, 10), description}
+	identity := []string{bookedOn.Format(time.DateOnly), itoa(amount), description}
 	if s.columns.balance != "" {
 		balance, err := money.ParseMinor(field(fields, s.header, s.columns.balance), money.CommaDecimal, currency.Exponent())
 		if err != nil {
 			return statement.Row{}, eris.Wrap(err, "balance")
 		}
 		row.BalanceAfterMinor = &balance
-		identity = append(identity, strconv.FormatInt(balance, 10))
+		identity = append(identity, itoa(balance))
 	}
 	row.IdentityKey = strings.Join(identity, "|")
 	return row, nil
@@ -266,3 +275,5 @@ func optionalMinor(raw string, currency money.Currency) (int64, error) {
 	}
 	return money.ParseMinor(raw, money.CommaDecimal, currency.Exponent())
 }
+
+func itoa(v int64) string { return strconv.FormatInt(v, 10) }

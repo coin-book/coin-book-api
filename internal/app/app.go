@@ -14,6 +14,7 @@ import (
 	"coin-book-api/internal/domain/categorization"
 	"coin-book-api/internal/domain/identity"
 	"coin-book-api/internal/domain/importing"
+	"coin-book-api/internal/domain/investment"
 	"coin-book-api/internal/domain/report"
 	"coin-book-api/internal/domain/settings"
 	"coin-book-api/internal/domain/spending"
@@ -23,6 +24,7 @@ import (
 	"coin-book-api/internal/platform/config"
 	"coin-book-api/internal/platform/db"
 	"coin-book-api/internal/platform/googleauth"
+	"coin-book-api/internal/platform/marketdata"
 	httppkg "coin-book-api/internal/transport/http"
 	"coin-book-api/internal/transport/http/accounts"
 	"coin-book-api/internal/transport/http/agenttokens"
@@ -30,6 +32,7 @@ import (
 	"coin-book-api/internal/transport/http/budgets"
 	"coin-book-api/internal/transport/http/categories"
 	"coin-book-api/internal/transport/http/imports"
+	"coin-book-api/internal/transport/http/investments"
 	"coin-book-api/internal/transport/http/reports"
 	settingshttp "coin-book-api/internal/transport/http/settings"
 	"coin-book-api/internal/transport/http/transactions"
@@ -41,9 +44,16 @@ type Build struct {
 	Commit  string
 }
 
+type App struct {
+	Handler http.Handler
+	API     huma.API
+	// Prices runs in the background for the server's lifetime; see investment.Refresher.Run.
+	Prices *investment.Refresher
+}
+
 // New builds the API. A nil pool is allowed for generating the OpenAPI document,
 // which only needs the operations registered, never executed.
-func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) (http.Handler, huma.API) {
+func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) *App {
 	sessions := identity.NewService(pool, cfg.JWT.Secret,
 		time.Duration(cfg.JWT.AccessTokenMinutes)*time.Minute, time.Duration(cfg.JWT.RefreshTokenHours)*time.Hour)
 	tokens := agentaccess.NewRepo(pool)
@@ -55,10 +65,11 @@ func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) (http.Ha
 	settingsRepo := settings.NewRepo(pool)
 	categorizer := categorization.NewService(pool, categoryRepo, settingsRepo)
 	transferService := transfer.NewService(pool, categorizer)
-	importer := importing.NewService(pool, accountRepo, categorizer, transferService, cfg.Storage.ImportsDir)
+	prices := newPriceRefresher(cfg.Market, pool, c)
+	importer := importing.NewService(pool, accountRepo, categorizer, transferService, prices, cfg.Storage.ImportsDir)
 	google := googleauth.New(cfg.Google, cfg.Server.PublicURL+auth.GoogleCallbackPath)
 
-	return httppkg.NewAPI(httppkg.Deps{
+	handler, api := httppkg.NewAPI(httppkg.Deps{
 		Config: cfg, Pool: pool, Sessions: sessions, Tokens: tokens,
 		BuildVersion: build.Version, BuildCommit: build.Commit,
 		Auth:         auth.NewHandler(sessions, google, cfg.Server),
@@ -71,5 +82,15 @@ func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) (http.Ha
 		Reports:      reports.NewHandler(report.NewService(spendingRepo)),
 		AgentTokens:  agenttokens.NewHandler(tokens),
 		Settings:     settingshttp.NewHandler(settingsRepo, categorizer),
+		Investments:  investments.NewHandler(investment.NewService(investment.NewRepo(pool), c), prices, c),
 	})
+	return &App{Handler: handler, API: api, Prices: prices}
+}
+
+func newPriceRefresher(cfg config.MarketConfig, pool *db.Pool, c clock.Clock) *investment.Refresher {
+	if !cfg.Enabled {
+		return investment.NewRefresher(pool, nil, nil, c, cfg.RefreshAtHour)
+	}
+	return investment.NewRefresher(pool, marketdata.NewYahoo(cfg.YahooURL, cfg.UserAgent),
+		marketdata.NewCNB(cfg.CNBURL, cfg.UserAgent), c, cfg.RefreshAtHour)
 }

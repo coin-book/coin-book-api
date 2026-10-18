@@ -45,7 +45,7 @@ type listAgentTokensOutput struct {
 type createAgentTokenInput struct {
 	Body struct {
 		Name          string   `json:"name" minLength:"1" maxLength:"80"`
-		Scopes        []string `json:"scopes" minItems:"1" enum:"accounts:read,transactions:read,categories:read,budgets:read,reports:read"`
+		Scopes        []string `json:"scopes" minItems:"1" enum:"accounts:read,transactions:read,categories:read,budgets:read,reports:read,investments:read"`
 		ExpiresInDays *int     `json:"expires_in_days,omitempty" minimum:"1" maximum:"365" doc:"Omit for a token that does not expire."`
 	}
 }

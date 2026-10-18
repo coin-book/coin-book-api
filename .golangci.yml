@@ -20,7 +20,7 @@ linters:
   settings:
     depguard:
       rules:
-        # N-1: the domain makes no network calls; a future price/FX provider gets its own allowed package.
+        # N-1: the domain makes no network calls; prices and rates come from internal/platform/marketdata.
         offline-domain:
           files:
             - "**/internal/domain/**"

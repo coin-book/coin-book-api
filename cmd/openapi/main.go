@@ -12,7 +12,7 @@ import (
 func main() {
 	cfg := &config.Config{}
 	cfg.Server.DocsEnabled = true
-	_, api := app.New(cfg, nil, clock.System{}, app.Build{})
+	api := app.New(cfg, nil, clock.System{}, app.Build{}).API
 
 	spec, err := api.OpenAPI().YAML()
 	if err != nil {

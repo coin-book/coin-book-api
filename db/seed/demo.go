@@ -1,5 +1,5 @@
-// Package seed creates demo data for local development: a user and three months of
-// synthetic statements imported through the real pipeline.
+// Package seed creates demo data for local development: a user, three months of
+// synthetic statements and a small portfolio, imported through the real pipeline.
 package seed
 
 import (
@@ -60,7 +60,7 @@ func Demo(ctx context.Context, pool *db.Pool, importsDir string) error {
 
 	categoryRepo := categorization.NewRepo(pool)
 	categorizer := categorization.NewService(pool, categoryRepo, settings.NewRepo(pool))
-	importer := importing.NewService(pool, account.NewRepo(pool), categorizer, transfer.NewService(pool, categorizer), importsDir)
+	importer := importing.NewService(pool, account.NewRepo(pool), categorizer, transfer.NewService(pool, categorizer), nil, importsDir)
 
 	today := clock.Today(clock.System{})
 	from := spending.MonthStart(today).AddDate(0, -(demoMonths - 1), 0)
@@ -68,8 +68,9 @@ func Demo(ctx context.Context, pool *db.Pool, importsDir string) error {
 
 	mbank, revolut := demoMovements(rng, from, today)
 	for name, content := range map[string][]byte{
-		"demo-mbank.csv":   mbankCSV(mbank, from, today),
-		"demo-revolut.csv": revolutCSV(revolut),
+		"demo-mbank.csv":       mbankCSV(mbank, from, today),
+		"demo-revolut.csv":     revolutCSV(revolut),
+		"demo-investments.csv": []byte(demoInvestmentsCSV),
 	} {
 		if _, err := importer.Commit(ctx, name, content, nil, false); err != nil && !errors.Is(err, importing.ErrAlreadyImported) {
 			return eris.Wrapf(err, "import %s", name)
@@ -151,6 +152,32 @@ func revolutCSV(rows []movement) []byte {
 	fmt.Fprintf(&b, "Spolu,,,\"%s CZK\",,,,\n---------\n", decimal(sum))
 	return b.Bytes()
 }
+
+// demoInvestmentsCSV has fixed dates, so a daily restart finds it already imported: one
+// lot held over three years, a recent buy, a sale from each, and monthly ETF purchases.
+const demoInvestmentsCSV = `Bežné účty Súhrny
+---------
+Investment Services Výpisy o transakciách
+Výpis transakcií (len potvrdenie o prijatí dividend)
+Dátum,Popis a symbol,ISIN,Krajina,Hrubá dividenda / príjem,Hrubá dividenda / príjem,Zrazené dane,Zrazené dane,Iné dane,Iné dane,Poplatky,Poplatky,Čistá dividenda / príjem,Čistá dividenda / príjem
+14. 8. 2026,Apple dividend,US0378331005,US,"1,30$","27,30 CZK","0,20$","4,20 CZK","0,00$","0,00 CZK","0,00 CZK","0,00 CZK","1,10$","23,10 CZK"
+Predané jednotky
+Dátum (predaja),Dátum (nákupu),"Popis, symbol a ISIN","Popis, symbol a ISIN",Krajina,Vek jednotiek,Units sold,Cena za jednotku (dátum začiatku výpredaja),Cena za jednotku (dátum zakúpenia),Cena za jednotku (dátum začiatku výpredaja),Cena za jednotku (dátum zakúpenia),Hodnota (predaja),Hodnota (nákupu),Hodnota (predaja),Hodnota (nákupu),Kapitálové zisky,Kapitálové zisky,Zrazené dane,Zrazené dane,Iné dane,Iné dane,Poplatky,Poplatky
+3. 3. 2026,2. 3. 2022,Apple Inc AAPL,US0378331005,US,1462 days,2,+US$250,-US$165.50,"+5,750 CZK","-3,720.44 CZK",+US$500,-US$331,"+11,500 CZK","-7,440.88 CZK",US$169,"3,859.12 CZK",US$0,0 CZK,US$0,0 CZK,US$0,0 CZK
+3. 3. 2026,15. 1. 2026,Apple Inc AAPL,US0378331005,US,47 days,1,+US$250,-US$260,"+5,750 CZK","-5,460 CZK",+US$250,-US$260,"+5,750 CZK","-5,460 CZK",-US$10,290 CZK,US$0,0 CZK,US$0,0 CZK,US$0,0 CZK
+Iné transakcie na brokerskom účte
+Dátum,Popis a symbol,ISIN,Množstvo,Krajina,Hrubá hodnota,Hrubá hodnota,Zrazené dane,Zrazené dane,Iné dane,Iné dane,Poplatky,Poplatky,Čistá hodnota,Čistá hodnota
+2. 3. 2022,AAPL,US0378331005,10,United States,US$1655,"37,202.20 CZK",US$0,0 CZK,US$0,0 CZK,US$0,0 CZK,US$1655,"37,202.20 CZK"
+15. 1. 2026,AAPL,US0378331005,4,United States,US$1040,"21,840 CZK",US$0,0 CZK,US$0,0 CZK,US$1,21 CZK,US$1041,"21,861 CZK"
+Robo-Advisor
+Iné transakcie na brokerskom účte
+Dátum,Popis a symbol,ISIN,Množstvo,Krajina,Hrubá hodnota,Hrubá hodnota,Zrazené dane,Zrazené dane,Iné dane,Iné dane,Poplatky,Poplatky,Čistá hodnota,Čistá hodnota
+3. 2. 2026,EUNL,IE00B4L5Y983,1.81818182,Ireland,€200.00,"4,860.00 CZK",€0,0 CZK,€0,0 CZK,€0,0 CZK,€200.00,"4,860.00 CZK"
+3. 3. 2026,EUNL,IE00B4L5Y983,1.78571429,Ireland,€200.00,"4,850.00 CZK",€0,0 CZK,€0,0 CZK,€0,0 CZK,€200.00,"4,850.00 CZK"
+3. 4. 2026,EUNL,IE00B4L5Y983,1.75438596,Ireland,€200.00,"4,870.00 CZK",€0,0 CZK,€0,0 CZK,€0,0 CZK,€200.00,"4,870.00 CZK"
+4. 5. 2026,EUNL,IE00B4L5Y983,1.69491525,Ireland,€200.00,"4,880.00 CZK",€0,0 CZK,€0,0 CZK,€0,0 CZK,€200.00,"4,880.00 CZK"
+---------
+`
 
 func decimal(minor int64) string {
 	sign := ""

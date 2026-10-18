@@ -1,0 +1,201 @@
+{
+  "Format": "revolut-consolidated-sk",
+  "Version": 2,
+  "PeriodFrom": null,
+  "PeriodTo": null,
+  "Accounts": [
+    {
+      "Ref": {
+        "Institution": "revolut",
+        "Kind": "broker",
+        "Currency": "USD",
+        "AccountNumber": null,
+        "ExternalRef": "revolut:broker",
+        "Name": "Revolut investice"
+      },
+      "Rows": null,
+      "Totals": null,
+      "DeclaredSum": null,
+      "Investments": {
+        "Buys": [
+          {
+            "Line": 25,
+            "TradedOn": "2026-01-15T00:00:00Z",
+            "Security": {
+              "ISIN": "US0378331005",
+              "Ticker": "AAPL",
+              "Name": ""
+            },
+            "Quantity": "3",
+            "Currency": "USD",
+            "GrossMinor": 78000,
+            "NetMinor": 78150,
+            "GrossCZKMinor": 1794000,
+            "NetCZKMinor": 1797450,
+            "FeeCZKMinor": 3450,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "buy|2026-01-15|US0378331005|3|78000"
+          },
+          {
+            "Line": 26,
+            "TradedOn": "2026-01-15T00:00:00Z",
+            "Security": {
+              "ISIN": "US0378331005",
+              "Ticker": "AAPL",
+              "Name": ""
+            },
+            "Quantity": "3",
+            "Currency": "USD",
+            "GrossMinor": 78000,
+            "NetMinor": 78150,
+            "GrossCZKMinor": 1794000,
+            "NetCZKMinor": 1797450,
+            "FeeCZKMinor": 3450,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "buy|2026-01-15|US0378331005|3|78000"
+          }
+        ],
+        "Dividends": [
+          {
+            "Line": 16,
+            "PaidOn": "2026-02-14T00:00:00Z",
+            "Security": {
+              "ISIN": "US0378331005",
+              "Ticker": "",
+              "Name": "Apple"
+            },
+            "Currency": "USD",
+            "GrossMinor": 250,
+            "NetMinor": 212,
+            "GrossCZKMinor": 5750,
+            "NetCZKMinor": 4876,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 874,
+            "IdentityKey": "dividend|2026-02-14|US0378331005|250"
+          }
+        ],
+        "LotSales": [
+          {
+            "Line": 20,
+            "SoldOn": "2026-03-03T00:00:00Z",
+            "BoughtOn": "2022-03-02T00:00:00Z",
+            "Security": {
+              "ISIN": "US0378331005",
+              "Ticker": "AAPL",
+              "Name": "Apple Inc"
+            },
+            "Quantity": "2",
+            "Currency": "USD",
+            "ProceedsMinor": 50000,
+            "CostMinor": 33100,
+            "GainMinor": 16900,
+            "ProceedsCZKMinor": 1150000,
+            "CostCZKMinor": 744088,
+            "GainCZKMinor": 385912,
+            "FeeCZKMinor": 496,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "lot|2026-03-03|US0378331005|2022-03-02|2|50000"
+          },
+          {
+            "Line": 21,
+            "SoldOn": "2026-03-03T00:00:00Z",
+            "BoughtOn": "2026-01-15T00:00:00Z",
+            "Security": {
+              "ISIN": "US0378331005",
+              "Ticker": "AAPL",
+              "Name": "Apple Inc"
+            },
+            "Quantity": "1",
+            "Currency": "USD",
+            "ProceedsMinor": 25000,
+            "CostMinor": 26000,
+            "GainMinor": -1000,
+            "ProceedsCZKMinor": 575000,
+            "CostCZKMinor": 546000,
+            "GainCZKMinor": 29000,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "lot|2026-03-03|US0378331005|2026-01-15|1|25000"
+          }
+        ]
+      }
+    },
+    {
+      "Ref": {
+        "Institution": "revolut",
+        "Kind": "broker",
+        "Currency": "EUR",
+        "AccountNumber": null,
+        "ExternalRef": "revolut:robo",
+        "Name": "Revolut Robo-Advisor"
+      },
+      "Rows": null,
+      "Totals": null,
+      "DeclaredSum": null,
+      "Investments": {
+        "Buys": [
+          {
+            "Line": 40,
+            "TradedOn": "2026-02-02T00:00:00Z",
+            "Security": {
+              "ISIN": "IE00B4L5Y983",
+              "Ticker": "EUNL",
+              "Name": ""
+            },
+            "Quantity": "1.5",
+            "Currency": "EUR",
+            "GrossMinor": 15000,
+            "NetMinor": 15000,
+            "GrossCZKMinor": 375000,
+            "NetCZKMinor": 375000,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "buy|2026-02-02|IE00B4L5Y983|1.5|15000"
+          }
+        ],
+        "Dividends": [
+          {
+            "Line": 32,
+            "PaidOn": "2026-04-20T00:00:00Z",
+            "Security": {
+              "ISIN": "IE00B4L5Y983",
+              "Ticker": "",
+              "Name": "iShares Core MSCI World UCITS ETF (Acc)"
+            },
+            "Currency": "EUR",
+            "GrossMinor": 123456,
+            "NetMinor": 123446,
+            "GrossCZKMinor": 3086400,
+            "NetCZKMinor": 3086150,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "dividend|2026-04-20|IE00B4L5Y983|123456"
+          }
+        ],
+        "LotSales": [
+          {
+            "Line": 36,
+            "SoldOn": "2026-05-05T00:00:00Z",
+            "BoughtOn": "2026-02-02T00:00:00Z",
+            "Security": {
+              "ISIN": "IE00B4L5Y983",
+              "Ticker": "EUNL",
+              "Name": "iShares Core MSCI World UCITS ETF (Acc)"
+            },
+            "Quantity": "0.12345678",
+            "Currency": "EUR",
+            "ProceedsMinor": 1358,
+            "CostMinor": 1235,
+            "GainMinor": 123,
+            "ProceedsCZKMinor": 33950,
+            "CostCZKMinor": 30875,
+            "GainCZKMinor": 3075,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "lot|2026-05-05|IE00B4L5Y983|2026-02-02|0.12345678|1358"
+          }
+        ]
+      }
+    }
+  ]
+}

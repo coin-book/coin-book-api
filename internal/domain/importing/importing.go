@@ -53,16 +53,25 @@ type TransferMatcher interface {
 	DetectOwn(ctx context.Context, q db.Querier, transactionIDs []string) (int, error)
 }
 
+// PriceRefresher fetches prices for instruments an import brought in, in the background.
+type PriceRefresher interface {
+	Trigger()
+}
+
 type Service struct {
 	pool        *db.Pool
 	accounts    *account.Repo
 	categorizer Categorizer
 	transfers   TransferMatcher
+	prices      PriceRefresher
 	importsDir  string
 }
 
-func NewService(pool *db.Pool, accounts *account.Repo, categorizer Categorizer, transfers TransferMatcher, importsDir string) *Service {
-	return &Service{pool: pool, accounts: accounts, categorizer: categorizer, transfers: transfers, importsDir: importsDir}
+// NewService takes a nil prices when nothing should fetch prices after an import.
+func NewService(pool *db.Pool, accounts *account.Repo, categorizer Categorizer, transfers TransferMatcher,
+	prices PriceRefresher, importsDir string) *Service {
+	return &Service{pool: pool, accounts: accounts, categorizer: categorizer, transfers: transfers, prices: prices,
+		importsDir: importsDir}
 }
 
 type RowStatus string
@@ -127,11 +136,12 @@ type plannedRow struct {
 }
 
 type plan struct {
-	result   *Result
-	st       *statement.Statement
-	accounts []*resolved
-	rows     []plannedRow
-	content  []byte
+	result      *Result
+	st          *statement.Statement
+	accounts    []*resolved
+	rows        []plannedRow
+	investments []*plannedInvestments
+	content     []byte
 }
 
 // Preview runs the whole pipeline without writing anything (F-IMP-4 dry-run).
@@ -148,6 +158,7 @@ func (s *Service) Preview(ctx context.Context, fileName string, content []byte, 
 // unless force is set, which is recorded on the batch.
 func (s *Service) Commit(ctx context.Context, fileName string, content []byte, mapping Mapping, force bool) (*Result, error) {
 	var result *Result
+	var wroteInvestments bool
 	sum := sha256.Sum256(content)
 	pending, err := s.stageOriginal(content)
 	if err != nil {
@@ -174,11 +185,15 @@ func (s *Service) Commit(ctx context.Context, fileName string, content []byte, m
 		if !p.result.ChecksPassed && !force {
 			return ErrChecksFailed
 		}
+		wroteInvestments = newRecords(p.investments)
 		return s.write(ctx, tx, p, force)
 	})
 	if err != nil {
 		_ = os.Remove(pending)
 		return result, err
+	}
+	if wroteInvestments && s.prices != nil {
+		s.prices.Trigger()
 	}
 	return result, s.keepOriginal(pending, hex.EncodeToString(sum[:]))
 }
@@ -202,14 +217,17 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 		FileName: filepath.Base(fileName), FileHash: hex.EncodeToString(sum[:]),
 		Format: st.Format, PeriodFrom: st.PeriodFrom, PeriodTo: st.PeriodTo, ChecksPassed: true,
 	}}
-	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM import_batch WHERE file_hash = $1 AND status = 'committed')`,
-		p.result.FileHash).Scan(&p.result.AlreadyImported); err != nil {
+	// A file read by an older parser version may hold what that version skipped (Revolut's
+	// investments before ADR 209); its rows dedupe by id, so importing it again is safe.
+	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM import_batch
+		WHERE file_hash = $1 AND status = 'committed' AND format = $2 AND parser_version >= $3)`,
+		p.result.FileHash, string(st.Format), st.Version).Scan(&p.result.AlreadyImported); err != nil {
 		return nil, eris.Wrap(err, "check previous import")
 	}
 
 	defaultName := strings.TrimSuffix(p.result.FileName, filepath.Ext(p.result.FileName))
 	for i, acc := range st.Accounts {
-		if len(acc.Rows) == 0 {
+		if !acc.HasRecords() {
 			continue
 		}
 		key := sourceKey(acc, i)
@@ -222,6 +240,10 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 
 		ar := AccountResult{Key: key, Ref: acc.Ref, IsNew: r.create != nil, MatchedBy: r.matchedBy,
 			NeedsMapping: acc.Ref.Identity() == "" && r.matchedBy != MatchedByUser, Rows: len(acc.Rows), Checks: runChecks(acc)}
+		if acc.Investments != nil {
+			ar.Rows += acc.Investments.Len()
+			p.investments = append(p.investments, planInvestments(acc.Investments, index, owner, r.idIdentity))
+		}
 		if r.existing != nil {
 			ar.AccountID = &r.existing.ID
 		}
@@ -258,6 +280,21 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 		}
 	}
 	p.result.RowsTotal = len(p.rows)
+	if err := markKnownInvestments(ctx, q, p.investments); err != nil {
+		return nil, err
+	}
+	for _, planned := range p.investments {
+		for _, r := range planned.all() {
+			p.result.RowsTotal++
+			if r.known {
+				p.result.Accounts[r.account].Duplicates++
+				p.result.RowsDuplicate++
+			} else {
+				p.result.Accounts[r.account].New++
+				p.result.RowsNew++
+			}
+		}
+	}
 	return p, nil
 }
 
@@ -346,6 +383,9 @@ func (s *Service) write(ctx context.Context, tx pgx.Tx, p *plan, forced bool) er
 
 	inserted, err := insertTransactions(ctx, tx, p, accountIDs, batchID)
 	if err != nil {
+		return err
+	}
+	if err := writeInvestments(ctx, tx, p.investments, accountIDs, batchID); err != nil {
 		return err
 	}
 	if err := analyzeTransactions(ctx, tx); err != nil {
@@ -443,6 +483,9 @@ func (s *Service) ensureAccounts(ctx context.Context, tx pgx.Tx, p *plan) ([]uui
 // openingBalance is known only when the statement carries running balances: the
 // balance before the first row. Otherwise the user enters it on the account.
 func openingBalance(acc *statement.Account) int64 {
+	if len(acc.Rows) == 0 {
+		return 0
+	}
 	first := acc.Rows[0]
 	if first.BalanceAfterMinor == nil {
 		return 0
@@ -523,8 +566,8 @@ func (s *Service) List(ctx context.Context) ([]Batch, error) {
 	return batches, eris.Wrap(err, "read imports")
 }
 
-// Rollback removes every transaction the import created, with their categories
-// and transfer pairs (F-IMP-4). The batch row stays as history.
+// Rollback removes every transaction and investment record the import created, with
+// their categories and transfer pairs (F-IMP-4). The batch row stays as history.
 func (s *Service) Rollback(ctx context.Context, id uuid.UUID) (int, error) {
 	var removed int64
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -544,6 +587,16 @@ func (s *Service) Rollback(ctx context.Context, id uuid.UUID) (int, error) {
 			return eris.Wrap(err, "delete imported transactions")
 		}
 		removed = tag.RowsAffected()
+		for _, deleteRecords := range []string{
+			`DELETE FROM investment_tx WHERE import_batch_id = $1`,
+			`DELETE FROM investment_lot_sale WHERE import_batch_id = $1`,
+		} {
+			tag, err := tx.Exec(ctx, deleteRecords, id)
+			if err != nil {
+				return eris.Wrap(err, "delete imported investment records")
+			}
+			removed += tag.RowsAffected()
+		}
 		_, err = tx.Exec(ctx, `UPDATE import_batch SET status = 'rolled_back', rolled_back_at = now() WHERE id = $1`, id)
 		return eris.Wrap(err, "mark import rolled back")
 	})

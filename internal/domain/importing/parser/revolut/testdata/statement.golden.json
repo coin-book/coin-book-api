@@ -1,6 +1,6 @@
 {
   "Format": "revolut-consolidated-sk",
-  "Version": 1,
+  "Version": 2,
   "PeriodFrom": null,
   "PeriodTo": null,
   "Accounts": [
@@ -207,6 +207,43 @@
       ],
       "Totals": null,
       "DeclaredSum": 2
+    },
+    {
+      "Ref": {
+        "Institution": "revolut",
+        "Kind": "broker",
+        "Currency": "USD",
+        "AccountNumber": null,
+        "ExternalRef": "revolut:broker",
+        "Name": "Revolut investice"
+      },
+      "Rows": null,
+      "Totals": null,
+      "DeclaredSum": null,
+      "Investments": {
+        "Buys": [
+          {
+            "Line": 51,
+            "TradedOn": "2026-10-03T00:00:00Z",
+            "Security": {
+              "ISIN": "US0000000002",
+              "Ticker": "TEST",
+              "Name": ""
+            },
+            "Quantity": "10",
+            "Currency": "USD",
+            "GrossMinor": 10000,
+            "NetMinor": 10000,
+            "GrossCZKMinor": 230000,
+            "NetCZKMinor": 230000,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "buy|2026-10-03|US0000000002|10|10000"
+          }
+        ],
+        "Dividends": null,
+        "LotSales": null
+      }
     }
   ]
 }

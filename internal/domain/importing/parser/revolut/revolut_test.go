@@ -32,9 +32,9 @@ func TestParseGolden(t *testing.T) {
 	testutil.AssertGoldenJSON(t, "testdata/statement.golden.json", parseFixture(t))
 }
 
-func TestParseReadsAccountsAndSkipsInvestments(t *testing.T) {
+func TestParseReadsAccounts(t *testing.T) {
 	st := parseFixture(t)
-	require.Len(t, st.Accounts, 3)
+	require.Len(t, st.Accounts, 4, "three cash accounts and the broker")
 
 	czk, eur, fund := st.Accounts[0], st.Accounts[1], st.Accounts[2]
 	assert.Equal(t, "revolut:personal:CZK", *czk.Ref.ExternalRef)

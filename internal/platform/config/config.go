@@ -21,6 +21,7 @@ type Config struct {
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	Storage  StorageConfig  `mapstructure:"storage"`
 	Google   GoogleConfig   `mapstructure:"google"`
+	Market   MarketConfig   `mapstructure:"market"`
 }
 
 type ServerConfig struct {
@@ -74,6 +75,15 @@ type GoogleConfig struct {
 
 func (g *GoogleConfig) Enabled() bool { return g.ClientID != "" }
 
+// MarketConfig is where prices and exchange rates come from (ADR 209).
+type MarketConfig struct {
+	Enabled       bool   `mapstructure:"enabled"`
+	YahooURL      string `mapstructure:"yahoo_url"`
+	CNBURL        string `mapstructure:"cnb_url"`
+	UserAgent     string `mapstructure:"user_agent"`
+	RefreshAtHour int    `mapstructure:"refresh_at_hour"`
+}
+
 type StorageConfig struct {
 	ImportsDir string `mapstructure:"imports_dir"`
 }
@@ -122,6 +132,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Storage.ImportsDir == "" {
 		return eris.New("config: storage.imports_dir is required")
+	}
+	if c.Market.RefreshAtHour < 0 || c.Market.RefreshAtHour > 23 {
+		return eris.New("config: market.refresh_at_hour must be 0-23")
 	}
 	c.Server.PublicURL = strings.TrimRight(c.Server.PublicURL, "/")
 	if c.Google.Enabled() && (c.Google.ClientSecret == "" || c.Server.PublicURL == "") {

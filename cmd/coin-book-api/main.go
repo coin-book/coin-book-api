@@ -69,10 +69,11 @@ func run() error {
 		slog.Warn("demo data applied — local development only", "email", seed.DemoEmail, "password", seed.DemoPassword)
 	}
 
-	handler, _ := app.New(cfg, pool, clock.System{}, app.Build{Version: buildVersion, Commit: buildCommit})
+	application := app.New(cfg, pool, clock.System{}, app.Build{Version: buildVersion, Commit: buildCommit})
+	go application.Prices.Run(ctx)
 	server := &http.Server{
 		Addr:              ":" + cfg.Server.Port,
-		Handler:           handler,
+		Handler:           application.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       2 * time.Minute,
 		WriteTimeout:      2 * time.Minute,

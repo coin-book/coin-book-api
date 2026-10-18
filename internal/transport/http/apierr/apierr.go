@@ -60,6 +60,8 @@ const (
 	CodeDuplicateBudgetLine Code = "duplicate_budget_line"
 	CodeInvalidCurrency     Code = "invalid_currency"
 	CodeInvalidCursor       Code = "invalid_cursor"
+
+	CodeInvalidSymbol Code = "invalid_symbol"
 )
 
 var details = map[Code]string{ //nolint:gosec // G101: error descriptions, not credentials
@@ -104,6 +106,7 @@ var details = map[Code]string{ //nolint:gosec // G101: error descriptions, not c
 	CodeDuplicateBudgetLine: "The same category or group is budgeted twice.",
 	CodeInvalidCurrency:     "That is not an ISO 4217 currency code.",
 	CodeInvalidCursor:       "The pagination cursor is not valid.",
+	CodeInvalidSymbol:       "That is not a valid Yahoo Finance symbol.",
 }
 
 func Codes() []Code {
