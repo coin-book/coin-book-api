@@ -1,17 +1,33 @@
 name: release
 
+# release-please keeps a release PR open; merging it tags vX.Y.Z (ADR 210). A tag pushed with
+# GITHUB_TOKEN starts no other workflow, so the image is built here, after the release step.
 on:
   push:
     branches: [main]
-    tags: ['v*']
-
-permissions:
-  contents: read
-  packages: write
 
 jobs:
-  image:
+  release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+
+  image:
+    needs: release-please
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASED: ${{ needs.release-please.outputs.created == 'true' }}
+      VERSION: ${{ needs.release-please.outputs.version }}
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
@@ -25,8 +41,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
+            type=raw,value=latest
+            type=semver,pattern={{version}},value=${{ env.VERSION }},enable=${{ env.RELEASED }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.VERSION }},enable=${{ env.RELEASED }}
             type=sha
       - uses: docker/build-push-action@v6
         with:
@@ -35,7 +52,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            BUILD_VERSION=${{ steps.meta.outputs.version }}
+            BUILD_VERSION=${{ env.RELEASED == 'true' && env.VERSION || format('main-{0}', github.sha) }}
             BUILD_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
