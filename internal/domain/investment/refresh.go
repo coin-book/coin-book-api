@@ -283,6 +283,17 @@ func (r *Refresher) refreshInstrument(ctx context.Context, t refreshTarget, toda
 		ON CONFLICT (symbol) DO UPDATE SET currency = coalesce(excluded.currency, price_series.currency),
 			fetched_through = excluded.fetched_through`,
 		t.symbol, currency, today)
+	if p := chart.Profile; p != nil && currency != nil {
+		batch.Queue(`
+			UPDATE price_series SET long_name = nullif($2, ''), exchange = nullif($3, ''), instrument_type = nullif($4, ''),
+				exchange_timezone = nullif($5, ''), first_trade_on = $6, fifty_two_week_low = $7::numeric,
+				fifty_two_week_high = $8::numeric, day_low = $9::numeric, day_high = $10::numeric, day_volume = $11,
+				market_price = $12::numeric, market_change_percent = $13::numeric, market_time = $14
+			WHERE symbol = $1`,
+			t.symbol, p.LongName, p.Exchange, p.InstrumentType, p.ExchangeTimezone, p.FirstTradeOn,
+			nullText(p.FiftyTwoWeekLow), nullText(p.FiftyTwoWeekHigh), nullText(p.DayLow), nullText(p.DayHigh), p.DayVolume,
+			nullText(p.MarketPrice), nullText(p.MarketChangePercent), p.MarketTime)
+	}
 	return eris.Wrap(r.sendBatch(ctx, batch), "store prices")
 }
 

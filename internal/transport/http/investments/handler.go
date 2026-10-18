@@ -58,6 +58,7 @@ type Quote struct {
 
 type Position struct {
 	Instrument        Instrument    `json:"instrument"`
+	AccountID         *uuid.UUID    `json:"account_id,omitempty" doc:"Only when positions are split per account."`
 	Quantity          string        `json:"quantity"`
 	Lots              []Lot         `json:"lots" doc:"Open lots, oldest first."`
 	Cost              *money.Amount `json:"cost,omitempty" doc:"In the lots' currency; absent when lots were bought in different currencies."`
@@ -86,6 +87,10 @@ type Portfolio struct {
 	RatesOn           *string      `json:"rates_on,omitempty" format:"date" doc:"Day of the ČNB rates used."`
 	IncompleteHistory []Instrument `json:"incomplete_history" doc:"Instruments with sales whose purchase was never imported; import older statements."`
 	Prices            PriceStatus  `json:"prices"`
+}
+
+type portfolioInput struct {
+	PerAccount bool `query:"per_account" doc:"One position per instrument and account instead of one per instrument."`
 }
 
 type portfolioOutput struct {
@@ -142,11 +147,40 @@ type Trade struct {
 	NetCZK    *money.Amount `json:"net_czk,omitempty"`
 }
 
+type MarketProfile struct {
+	Symbol              string     `json:"symbol"`
+	Currency            string     `json:"currency" doc:"The quote's."`
+	LongName            string     `json:"long_name,omitempty"`
+	Exchange            string     `json:"exchange,omitempty" example:"NasdaqGS"`
+	InstrumentType      string     `json:"instrument_type,omitempty" doc:"Yahoo's type: EQUITY, ETF, MUTUALFUND, …"`
+	ExchangeTimezone    string     `json:"exchange_timezone,omitempty" example:"America/New_York"`
+	FirstTradeOn        *string    `json:"first_trade_on,omitempty" format:"date" doc:"When the symbol first traded."`
+	FiftyTwoWeekLow     *string    `json:"fifty_two_week_low,omitempty"`
+	FiftyTwoWeekHigh    *string    `json:"fifty_two_week_high,omitempty"`
+	DayLow              *string    `json:"day_low,omitempty"`
+	DayHigh             *string    `json:"day_high,omitempty"`
+	DayVolume           *int64     `json:"day_volume,omitempty"`
+	MarketPrice         *string    `json:"market_price,omitempty" doc:"The last regular-session price."`
+	MarketChangePercent *string    `json:"market_change_percent,omitempty" doc:"Change against the previous close, in percent."`
+	MarketTime          *time.Time `json:"market_time,omitempty"`
+}
+
+type HoldingSummary struct {
+	FirstBoughtOn   *string      `json:"first_bought_on,omitempty" format:"date"`
+	InvestedCZK     money.Amount `json:"invested_czk" doc:"All purchases with fees."`
+	SoldQuantity    string       `json:"sold_quantity"`
+	RealizedGainCZK money.Amount `json:"realized_gain_czk"`
+	RealizedCostCZK money.Amount `json:"realized_cost_czk" doc:"What the sold lots cost; the gain's base for a percentage."`
+	DividendsNetCZK money.Amount `json:"dividends_net_czk"`
+}
+
 type InstrumentDetail struct {
-	Instrument Instrument `json:"instrument"`
-	Position   *Position  `json:"position,omitempty" doc:"Absent once everything is sold."`
-	Trades     []Trade    `json:"trades" doc:"Buys and dividends, oldest first."`
-	Sales      []SoldLot  `json:"sales" doc:"Sold lots, oldest first."`
+	Instrument Instrument     `json:"instrument"`
+	Position   *Position      `json:"position,omitempty" doc:"Absent once everything is sold."`
+	Market     *MarketProfile `json:"market,omitempty" doc:"What Yahoo says about the symbol; absent until it is priced."`
+	Summary    HoldingSummary `json:"summary" doc:"The user's whole history with the instrument, in CZK."`
+	Trades     []Trade        `json:"trades" doc:"Buys and dividends, oldest first."`
+	Sales      []SoldLot      `json:"sales" doc:"Sold lots, oldest first."`
 }
 
 type instrumentOutput struct {
@@ -227,8 +261,8 @@ func (h *Handler) Register(api huma.API) {
 	}}, h.refresh)
 }
 
-func (h *Handler) portfolio(ctx context.Context, _ *struct{}) (*portfolioOutput, error) {
-	p, err := h.service.Portfolio(ctx)
+func (h *Handler) portfolio(ctx context.Context, in *portfolioInput) (*portfolioOutput, error) {
+	p, err := h.service.Portfolio(ctx, in.PerAccount)
 	if err != nil {
 		return nil, apierr.Internal(ctx, err)
 	}
@@ -279,7 +313,23 @@ func (h *Handler) instrument(ctx context.Context, in *isinInput) (*instrumentOut
 	if err != nil {
 		return nil, apierr.Internal(ctx, err)
 	}
-	out := InstrumentDetail{Instrument: instrumentDTO(d.Instrument), Trades: []Trade{}, Sales: make([]SoldLot, 0, len(d.Sales))}
+	out := InstrumentDetail{Instrument: instrumentDTO(d.Instrument), Trades: []Trade{}, Sales: make([]SoldLot, 0, len(d.Sales)),
+		Summary: HoldingSummary{
+			FirstBoughtOn: dto.DatePtr(d.Summary.FirstBoughtOn), InvestedCZK: czk(d.Summary.InvestedCZKMinor),
+			SoldQuantity: d.Summary.SoldQuantity.String(), RealizedGainCZK: czk(d.Summary.RealizedGainCZKMinor),
+			RealizedCostCZK: czk(d.Summary.RealizedCostCZKMinor),
+			DividendsNetCZK: czk(d.Summary.DividendsNetCZKMinor),
+		},
+	}
+	if m := d.Market; m != nil {
+		out.Market = &MarketProfile{
+			Symbol: m.Symbol, Currency: string(m.Currency), LongName: m.LongName, Exchange: m.Exchange,
+			InstrumentType: m.InstrumentType, ExchangeTimezone: m.ExchangeTimezone, FirstTradeOn: dto.DatePtr(m.FirstTradeOn),
+			FiftyTwoWeekLow: nullDecimal(m.FiftyTwoWeekLow), FiftyTwoWeekHigh: nullDecimal(m.FiftyTwoWeekHigh),
+			DayLow: nullDecimal(m.DayLow), DayHigh: nullDecimal(m.DayHigh), DayVolume: m.DayVolume,
+			MarketPrice: nullDecimal(m.MarketPrice), MarketChangePercent: nullDecimal(m.MarketChangePercent), MarketTime: m.MarketTime,
+		}
+	}
 	if d.Position != nil {
 		pos := positionDTO(*d.Position)
 		out.Position = &pos
@@ -362,7 +412,7 @@ func instrumentDTO(i investment.Instrument) Instrument {
 
 func positionDTO(p investment.Position) Position {
 	out := Position{
-		Instrument: instrumentDTO(p.Instrument), Quantity: p.Quantity.String(), Lots: make([]Lot, 0, len(p.Lots)),
+		Instrument: instrumentDTO(p.Instrument), AccountID: p.AccountID, Quantity: p.Quantity.String(), Lots: make([]Lot, 0, len(p.Lots)),
 		CostCZK:  czkPtr(p.CostCZKMinor),
 		ValueCZK: czkPtr(p.ValueCZKMinor), DividendsNetCZK: czk(p.DividendsNetCZKMinor),
 		IncompleteHistory: p.IncompleteHistory, ExemptQuantity: p.ExemptQuantity.String(), NextExemptOn: dto.DatePtr(p.NextExemptOn),

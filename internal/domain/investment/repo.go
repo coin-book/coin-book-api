@@ -222,6 +222,64 @@ type Candle struct {
 	Volume *int64
 }
 
+// MarketProfile is what Yahoo says about the symbol an instrument is priced by; any field may be empty.
+type MarketProfile struct {
+	Symbol              string
+	Currency            money.Currency
+	LongName            string
+	Exchange            string
+	InstrumentType      string
+	ExchangeTimezone    string
+	FirstTradeOn        *time.Time
+	FiftyTwoWeekLow     decimal.NullDecimal
+	FiftyTwoWeekHigh    decimal.NullDecimal
+	DayLow              decimal.NullDecimal
+	DayHigh             decimal.NullDecimal
+	DayVolume           *int64
+	MarketPrice         decimal.NullDecimal
+	MarketChangePercent decimal.NullDecimal
+	MarketTime          *time.Time
+}
+
+// marketProfile is nil until the symbol has been priced.
+func (r *Repo) marketProfile(ctx context.Context, symbol string) (*MarketProfile, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT symbol, currency, coalesce(long_name, ''), coalesce(exchange, ''), coalesce(instrument_type, ''),
+			coalesce(exchange_timezone, ''), first_trade_on, fifty_two_week_low::text, fifty_two_week_high::text,
+			day_low::text, day_high::text, day_volume, market_price::text, market_change_percent::text, market_time
+		FROM price_series WHERE symbol = $1 AND currency IS NOT NULL`, symbol)
+	if err != nil {
+		return nil, eris.Wrap(err, "read market profile")
+	}
+	profiles, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (MarketProfile, error) {
+		var p MarketProfile
+		var low, high, dayLow, dayHigh, price, change *string
+		if err := row.Scan(&p.Symbol, &p.Currency, &p.LongName, &p.Exchange, &p.InstrumentType, &p.ExchangeTimezone,
+			&p.FirstTradeOn, &low, &high, &dayLow, &dayHigh, &p.DayVolume, &price, &change, &p.MarketTime); err != nil {
+			return p, err
+		}
+		p.Currency = money.Currency(strings.TrimSpace(string(p.Currency)))
+		for _, v := range []struct {
+			raw *string
+			to  *decimal.NullDecimal
+		}{{low, &p.FiftyTwoWeekLow}, {high, &p.FiftyTwoWeekHigh}, {dayLow, &p.DayLow}, {dayHigh, &p.DayHigh},
+			{price, &p.MarketPrice}, {change, &p.MarketChangePercent}} {
+			if v.raw != nil {
+				d, err := decimal.NewFromString(*v.raw)
+				if err != nil {
+					return p, err
+				}
+				*v.to = decimal.NullDecimal{Decimal: d, Valid: true}
+			}
+		}
+		return p, nil
+	})
+	if err != nil || len(profiles) == 0 {
+		return nil, eris.Wrap(err, "read market profile")
+	}
+	return &profiles[0], nil
+}
+
 // seriesCurrency is nil until the symbol's prices are fetched.
 func (r *Repo) seriesCurrency(ctx context.Context, symbol string) (*money.Currency, error) {
 	var currency *money.Currency

@@ -1,0 +1,14 @@
+ALTER TABLE price_series
+    DROP COLUMN long_name,
+    DROP COLUMN exchange,
+    DROP COLUMN instrument_type,
+    DROP COLUMN exchange_timezone,
+    DROP COLUMN first_trade_on,
+    DROP COLUMN fifty_two_week_low,
+    DROP COLUMN fifty_two_week_high,
+    DROP COLUMN day_low,
+    DROP COLUMN day_high,
+    DROP COLUMN day_volume,
+    DROP COLUMN market_price,
+    DROP COLUMN market_change_percent,
+    DROP COLUMN market_time;

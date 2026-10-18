@@ -12,7 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const chartBody = `{"chart":{"result":[{"meta":{"currency":"USD","gmtoffset":-14400},
+const chartBody = `{"chart":{"result":[{"meta":{"currency":"USD","gmtoffset":-14400,"longName":"Apple Inc.",
+	"fullExchangeName":"NasdaqGS","instrumentType":"EQUITY","exchangeTimezoneName":"America/New_York",
+	"firstTradeDate":345479400,"fiftyTwoWeekLow":243.42,"fiftyTwoWeekHigh":348.15,"regularMarketPrice":343.4599914550781,
+	"regularMarketChangePercent":0.42700000001,"regularMarketVolume":59852690,"regularMarketTime":1792180801},
 	"timestamp":[1767969000,1768055400,1768314600],
 	"indicators":{"quote":[{"open":[100.5,null,102],"high":[101,null,103.25],"low":[99,null,101],
 	"close":[100.75,null,102.5],"volume":[1000000,null,2500000]}]}}],"error":null}}`
@@ -38,6 +41,17 @@ func TestYahooDailyBars(t *testing.T) {
 	assert.Equal(t, "100.5", chart.Bars[0].Open.Decimal.String())
 	assert.Equal(t, int64(1000000), *chart.Bars[0].Volume)
 	assert.Equal(t, time.Date(2026, 1, 13, 0, 0, 0, 0, time.UTC), chart.Bars[1].Day)
+
+	p := chart.Profile
+	require.NotNil(t, p)
+	assert.Equal(t, "Apple Inc.", p.LongName)
+	assert.Equal(t, "NasdaqGS", p.Exchange)
+	assert.Equal(t, "EQUITY", p.InstrumentType)
+	assert.Equal(t, time.Date(1980, 12, 12, 0, 0, 0, 0, time.UTC), *p.FirstTradeOn)
+	assert.Equal(t, "343.46", p.MarketPrice.Decimal.String())
+	assert.Equal(t, "0.427", p.MarketChangePercent.Decimal.String())
+	assert.Equal(t, int64(59852690), *p.DayVolume)
+	assert.False(t, p.DayLow.Valid, "a field Yahoo leaves out stays empty")
 }
 
 func TestYahooUnknownSymbolIsEmpty(t *testing.T) {

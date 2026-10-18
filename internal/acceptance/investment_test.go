@@ -58,7 +58,9 @@ func fakeMarket(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/cnb":
 			_, _ = w.Write([]byte("16.10.2026 #200\nzemě|měna|množství|kód|kurz\nEMU|euro|1|EUR|25,000\nUSA|dolar|1|USD|20,000\n"))
 		case strings.HasSuffix(r.URL.Path, "/AAPL"):
-			_, _ = w.Write([]byte(`{"chart":{"result":[{"meta":{"currency":"USD","gmtoffset":-14400},"timestamp":[1792157400],
+			_, _ = w.Write([]byte(`{"chart":{"result":[{"meta":{"currency":"USD","gmtoffset":-14400,"longName":"Apple Inc.",
+				"fullExchangeName":"NasdaqGS","instrumentType":"EQUITY","fiftyTwoWeekLow":243.42,"fiftyTwoWeekHigh":348.15},
+				"timestamp":[1792157400],
 				"indicators":{"quote":[{"open":[299],"high":[301],"low":[298],"close":[300],"volume":[1000]}]}}]}}`))
 		case strings.HasSuffix(r.URL.Path, "/EUNL.DE"):
 			_, _ = w.Write([]byte(`{"chart":{"result":[{"meta":{"currency":"EUR","gmtoffset":7200},"timestamp":[1792134000],
@@ -128,6 +130,35 @@ func TestRevolutInvestmentsBecomePositionsValuedAtMarketPrices(t *testing.T) {
 			Close string  `json:"close"`
 		} `json:"candles"`
 	}
+	var apple struct {
+		Market *struct {
+			LongName         string `json:"long_name"`
+			Exchange         string `json:"exchange"`
+			InstrumentType   string `json:"instrument_type"`
+			FiftyTwoWeekHigh string `json:"fifty_two_week_high"`
+		} `json:"market"`
+		Summary struct {
+			FirstBoughtOn   string                `json:"first_bought_on"`
+			InvestedCZK     struct{ Minor int64 } `json:"invested_czk"`
+			SoldQuantity    string                `json:"sold_quantity"`
+			RealizedGainCZK struct{ Minor int64 } `json:"realized_gain_czk"`
+			RealizedCostCZK struct{ Minor int64 } `json:"realized_cost_czk"`
+			DividendsNetCZK struct{ Minor int64 } `json:"dividends_net_czk"`
+		} `json:"summary"`
+	}
+	c.do(http.MethodGet, "/api/v1/investments/instruments/US0378331005", nil, http.StatusOK, &apple)
+	require.NotNil(t, apple.Market)
+	assert.Equal(t, "Apple Inc.", apple.Market.LongName)
+	assert.Equal(t, "NasdaqGS", apple.Market.Exchange)
+	assert.Equal(t, "EQUITY", apple.Market.InstrumentType)
+	assert.Equal(t, "348.15", apple.Market.FiftyTwoWeekHigh)
+	assert.Equal(t, "2022-03-02", apple.Summary.FirstBoughtOn, "a sold lot tells of an earlier purchase")
+	assert.Equal(t, int64(2*1797450), apple.Summary.InvestedCZK.Minor)
+	assert.Equal(t, "3", apple.Summary.SoldQuantity)
+	assert.Equal(t, int64(385912+29000), apple.Summary.RealizedGainCZK.Minor)
+	assert.Equal(t, int64(744088+546000), apple.Summary.RealizedCostCZK.Minor)
+	assert.Equal(t, int64(4876), apple.Summary.DividendsNetCZK.Minor)
+
 	c.do(http.MethodGet, "/api/v1/investments/instruments/IE00B4L5Y983/candles?from=2026-01-01", nil, http.StatusOK, &candles)
 	require.Len(t, candles.Candles, 1)
 	assert.Equal(t, "2026-10-16", candles.Candles[0].Day)
@@ -337,4 +368,45 @@ func TestASymbolYahooAnsweredEmptyIsAskedForItsWholeHistoryAgain(t *testing.T) {
 	weekBack := strconv.FormatInt(time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC).Unix(), 10)
 	assert.Contains(t, requested, "/v8/finance/chart/NOPE.XX?"+historyStart, "an empty answer may be Yahoo's hiccup")
 	assert.Contains(t, requested, "/v8/finance/chart/AAPL?"+weekBack, "a symbol with prices is asked for days")
+}
+
+func TestPositionsCanBeSplitPerAccount(t *testing.T) {
+	c := newMarketClient(t)
+	robo := "2. 2. 2026,EUNL,"
+	appleInRobo := `2. 2. 2026,AAPL,US0378331005,1,United States,US$250,"5,250 CZK",US$0,0 CZK,US$0,0 CZK,US$0,0 CZK,US$250,"5,250 CZK",,,,,,,,` + "\n"
+	content := strings.Replace(string(investmentStatement(t)), robo, strings.TrimSuffix(appleInRobo, "\n")+"\n"+robo, 1)
+	require.Contains(t, content, appleInRobo)
+	c.upload("/api/v1/imports", "investments.csv", []byte(content), http.StatusCreated, nil)
+	require.Zero(t, c.prices.Refresh(context.Background()))
+
+	type position struct {
+		Instrument struct {
+			Ticker string `json:"ticker"`
+		} `json:"instrument"`
+		AccountID *string `json:"account_id"`
+		Quantity  string  `json:"quantity"`
+	}
+	var together, split struct {
+		Positions []position `json:"positions"`
+		ValueCZK  struct {
+			Minor int64 `json:"minor"`
+		} `json:"value_czk"`
+	}
+	c.do(http.MethodGet, "/api/v1/investments/portfolio", nil, http.StatusOK, &together)
+	c.do(http.MethodGet, "/api/v1/investments/portfolio?per_account=true", nil, http.StatusOK, &split)
+
+	require.Len(t, together.Positions, 2)
+	assert.Equal(t, "6", together.Positions[0].Quantity)
+	assert.Nil(t, together.Positions[0].AccountID)
+
+	require.Len(t, split.Positions, 3)
+	var apple []string
+	for _, p := range split.Positions {
+		require.NotNil(t, p.AccountID)
+		if p.Instrument.Ticker == "AAPL" {
+			apple = append(apple, p.Quantity)
+		}
+	}
+	assert.ElementsMatch(t, []string{"5", "1"}, apple)
+	assert.Equal(t, together.ValueCZK.Minor, split.ValueCZK.Minor)
 }

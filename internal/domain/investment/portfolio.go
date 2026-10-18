@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"coin-book-api/internal/platform/clock"
@@ -22,8 +23,10 @@ func NewService(repo *Repo, c clock.Clock) *Service { return &Service{repo: repo
 
 type Position struct {
 	Instrument Instrument
-	Quantity   decimal.Decimal
-	Lots       []Lot
+	// AccountID is set when positions are split per account; nil for one across all accounts.
+	AccountID *uuid.UUID
+	Quantity  decimal.Decimal
+	Lots      []Lot
 	// CostMinor is in CostCurrency, the lots' currency; zero when MixedCurrencies.
 	CostMinor       int64
 	CostCurrency    money.Currency
@@ -58,12 +61,13 @@ type Portfolio struct {
 	IncompleteHistory []Instrument
 }
 
-func (s *Service) Portfolio(ctx context.Context) (*Portfolio, error) {
+// Portfolio holds one position per instrument, or per instrument and account when perAccount.
+func (s *Service) Portfolio(ctx context.Context, perAccount bool) (*Portfolio, error) {
 	h, err := s.repo.history(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	positions, err := s.positions(ctx, h)
+	positions, err := s.positions(ctx, h, perAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -94,16 +98,32 @@ func (s *Service) Portfolio(ctx context.Context) (*Portfolio, error) {
 	return p, nil
 }
 
-func (s *Service) positions(ctx context.Context, h *history) ([]Position, error) {
+type positionKey struct {
+	isin    string
+	account uuid.UUID
+}
+
+func (s *Service) positions(ctx context.Context, h *history, perAccount bool) ([]Position, error) {
+	keyOf := func(isin string, account uuid.UUID) positionKey {
+		if perAccount {
+			return positionKey{isin, account}
+		}
+		return positionKey{isin: isin}
+	}
 	lots, incomplete := OpenLots(h.buys, h.sales)
-	byISIN := map[string]*Position{}
-	var order []string
+	byKey := map[positionKey]*Position{}
+	var order []positionKey
 	for _, lot := range lots {
-		pos, ok := byISIN[lot.ISIN]
+		key := keyOf(lot.ISIN, lot.AccountID)
+		pos, ok := byKey[key]
 		if !ok {
 			pos = &Position{Instrument: h.instruments[lot.ISIN], CostCZKMinor: new(int64)}
-			byISIN[lot.ISIN] = pos
-			order = append(order, lot.ISIN)
+			if perAccount {
+				account := lot.AccountID
+				pos.AccountID = &account
+			}
+			byKey[key] = pos
+			order = append(order, key)
 		}
 		pos.Lots = append(pos.Lots, lot)
 		pos.Quantity = pos.Quantity.Add(lot.Quantity)
@@ -121,13 +141,13 @@ func (s *Service) positions(ctx context.Context, h *history) ([]Position, error)
 		}
 	}
 	for _, d := range h.dividends {
-		if pos, ok := byISIN[d.ISIN]; ok && d.NetCZKMinor != nil {
+		if pos, ok := byKey[keyOf(d.ISIN, d.AccountID)]; ok && d.NetCZKMinor != nil {
 			pos.DividendsNetCZKMinor += *d.NetCZKMinor
 		}
 	}
 
 	var symbols []string
-	for _, pos := range byISIN {
+	for _, pos := range byKey {
 		if pos.Instrument.YahooSymbol != nil {
 			symbols = append(symbols, *pos.Instrument.YahooSymbol)
 		}
@@ -142,12 +162,12 @@ func (s *Service) positions(ctx context.Context, h *history) ([]Position, error)
 	}
 	today := clock.Today(s.clock)
 	positions := make([]Position, 0, len(order))
-	for _, isin := range order {
-		pos := byISIN[isin]
+	for _, key := range order {
+		pos := byKey[key]
 		if pos.MixedCurrencies {
 			pos.CostMinor = 0
 		}
-		pos.IncompleteHistory = incomplete[isin]
+		pos.IncompleteHistory = incomplete[key.isin]
 		pos.timeTest(today)
 		if pos.Instrument.YahooSymbol != nil {
 			if q, ok := quotes[*pos.Instrument.YahooSymbol]; ok {
@@ -156,7 +176,7 @@ func (s *Service) positions(ctx context.Context, h *history) ([]Position, error)
 		}
 		positions = append(positions, *pos)
 	}
-	slices.SortFunc(positions, func(a, b Position) int {
+	slices.SortStableFunc(positions, func(a, b Position) int {
 		return strings.Compare(a.Instrument.label(), b.Instrument.label())
 	})
 	return positions, nil
@@ -215,10 +235,56 @@ func minorPerUnit(c money.Currency) decimal.Decimal {
 type InstrumentDetail struct {
 	Instrument Instrument
 	// Position is nil once everything is sold.
-	Position  *Position
+	Position *Position
+	// Market is nil until the instrument's symbol has been priced.
+	Market    *MarketProfile
+	Summary   HoldingSummary
 	Buys      []Buy
 	Sales     []LotSale
 	Dividends []Dividend
+}
+
+// HoldingSummary is the user's whole history with an instrument, in CZK as the statements
+// convert it; records without a CZK value are left out of the sums.
+type HoldingSummary struct {
+	// FirstBoughtOn is nil when no purchase is known, not even through a sold lot.
+	FirstBoughtOn        *time.Time
+	InvestedCZKMinor     int64
+	SoldQuantity         decimal.Decimal
+	RealizedGainCZKMinor int64
+	// RealizedCostCZKMinor is what the lots behind RealizedGainCZKMinor cost, its base for a percentage.
+	RealizedCostCZKMinor int64
+	DividendsNetCZKMinor int64
+}
+
+func summarize(h *history) HoldingSummary {
+	var s HoldingSummary
+	earliest := func(day time.Time) {
+		if s.FirstBoughtOn == nil || day.Before(*s.FirstBoughtOn) {
+			d := day
+			s.FirstBoughtOn = &d
+		}
+	}
+	for _, b := range h.buys {
+		earliest(b.TradedOn)
+		if b.NetCZKMinor != nil {
+			s.InvestedCZKMinor += *b.NetCZKMinor
+		}
+	}
+	for _, l := range h.sales {
+		earliest(l.BoughtOn)
+		s.SoldQuantity = s.SoldQuantity.Add(l.Quantity)
+		if l.GainCZKMinor != nil && l.CostCZKMinor != nil {
+			s.RealizedGainCZKMinor += *l.GainCZKMinor
+			s.RealizedCostCZKMinor += *l.CostCZKMinor
+		}
+	}
+	for _, d := range h.dividends {
+		if d.NetCZKMinor != nil {
+			s.DividendsNetCZKMinor += *d.NetCZKMinor
+		}
+	}
+	return s
 }
 
 func (s *Service) Instrument(ctx context.Context, isin string) (*InstrumentDetail, error) {
@@ -230,13 +296,18 @@ func (s *Service) Instrument(ctx context.Context, isin string) (*InstrumentDetai
 	if !ok {
 		return nil, ErrNotFound
 	}
-	positions, err := s.positions(ctx, h)
+	positions, err := s.positions(ctx, h, false)
 	if err != nil {
 		return nil, err
 	}
-	d := &InstrumentDetail{Instrument: instrument, Buys: h.buys, Sales: h.sales, Dividends: h.dividends}
+	d := &InstrumentDetail{Instrument: instrument, Summary: summarize(h), Buys: h.buys, Sales: h.sales, Dividends: h.dividends}
 	if len(positions) == 1 {
 		d.Position = &positions[0]
+	}
+	if instrument.YahooSymbol != nil {
+		if d.Market, err = s.repo.marketProfile(ctx, *instrument.YahooSymbol); err != nil {
+			return nil, err
+		}
 	}
 	return d, nil
 }

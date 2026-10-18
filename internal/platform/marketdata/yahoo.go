@@ -27,6 +27,26 @@ type Bar struct {
 type Chart struct {
 	Currency string
 	Bars     []Bar
+	// Profile is nil when Yahoo knows nothing about the symbol.
+	Profile *Profile
+}
+
+// Profile is what the chart answer says about the symbol itself; any field may be empty.
+// Sector, market cap and the like are only in quoteSummary, which needs a session crumb.
+type Profile struct {
+	LongName            string
+	Exchange            string
+	InstrumentType      string
+	ExchangeTimezone    string
+	FirstTradeOn        *time.Time
+	FiftyTwoWeekLow     decimal.NullDecimal
+	FiftyTwoWeekHigh    decimal.NullDecimal
+	DayLow              decimal.NullDecimal
+	DayHigh             decimal.NullDecimal
+	DayVolume           *int64
+	MarketPrice         decimal.NullDecimal
+	MarketChangePercent decimal.NullDecimal
+	MarketTime          *time.Time
 }
 
 // Yahoo reads the public chart endpoint, the same one the trading project uses
@@ -44,11 +64,8 @@ func NewYahoo(baseURL, userAgent string) *Yahoo {
 type yahooChart struct {
 	Chart struct {
 		Result []struct {
-			Meta struct {
-				Currency  string `json:"currency"`
-				GMTOffset int64  `json:"gmtoffset"`
-			} `json:"meta"`
-			Timestamp  []int64 `json:"timestamp"`
+			Meta       yahooMeta `json:"meta"`
+			Timestamp  []int64   `json:"timestamp"`
 			Indicators struct {
 				Quote []struct {
 					Open   []*float64 `json:"open"`
@@ -63,6 +80,62 @@ type yahooChart struct {
 			Description string `json:"description"`
 		} `json:"error"`
 	} `json:"chart"`
+}
+
+type yahooMeta struct {
+	Currency                   string   `json:"currency"`
+	GMTOffset                  int64    `json:"gmtoffset"`
+	LongName                   string   `json:"longName"`
+	ShortName                  string   `json:"shortName"`
+	FullExchangeName           string   `json:"fullExchangeName"`
+	InstrumentType             string   `json:"instrumentType"`
+	ExchangeTimezoneName       string   `json:"exchangeTimezoneName"`
+	FirstTradeDate             *int64   `json:"firstTradeDate"`
+	FiftyTwoWeekLow            *float64 `json:"fiftyTwoWeekLow"`
+	FiftyTwoWeekHigh           *float64 `json:"fiftyTwoWeekHigh"`
+	RegularMarketDayLow        *float64 `json:"regularMarketDayLow"`
+	RegularMarketDayHigh       *float64 `json:"regularMarketDayHigh"`
+	RegularMarketVolume        *float64 `json:"regularMarketVolume"`
+	RegularMarketPrice         *float64 `json:"regularMarketPrice"`
+	RegularMarketChangePercent *float64 `json:"regularMarketChangePercent"`
+	RegularMarketTime          *int64   `json:"regularMarketTime"`
+}
+
+func (m yahooMeta) profile() *Profile {
+	p := &Profile{
+		LongName: m.LongName, Exchange: m.FullExchangeName, InstrumentType: m.InstrumentType,
+		ExchangeTimezone: m.ExchangeTimezoneName,
+		FiftyTwoWeekLow:  optionalPrice(m.FiftyTwoWeekLow), FiftyTwoWeekHigh: optionalPrice(m.FiftyTwoWeekHigh),
+		DayLow: optionalPrice(m.RegularMarketDayLow), DayHigh: optionalPrice(m.RegularMarketDayHigh),
+		MarketPrice: optionalPrice(m.RegularMarketPrice),
+	}
+	if p.LongName == "" {
+		p.LongName = m.ShortName
+	}
+	if m.RegularMarketChangePercent != nil {
+		p.MarketChangePercent = decimal.NullDecimal{Decimal: decimal.NewFromFloat(*m.RegularMarketChangePercent).Round(4), Valid: true}
+	}
+	if m.RegularMarketVolume != nil {
+		volume := int64(*m.RegularMarketVolume)
+		p.DayVolume = &volume
+	}
+	if m.FirstTradeDate != nil {
+		first := time.Unix(*m.FirstTradeDate+m.GMTOffset, 0).UTC()
+		day := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, time.UTC)
+		p.FirstTradeOn = &day
+	}
+	if m.RegularMarketTime != nil {
+		at := time.Unix(*m.RegularMarketTime, 0).UTC()
+		p.MarketTime = &at
+	}
+	return p
+}
+
+func optionalPrice(v *float64) decimal.NullDecimal {
+	if v == nil {
+		return decimal.NullDecimal{}
+	}
+	return decimal.NullDecimal{Decimal: price(*v), Valid: true}
 }
 
 // DailyBars fetches the days from..to inclusive. An unknown symbol is an empty chart.
@@ -99,7 +172,7 @@ func parseYahooChart(body []byte, symbol string) (*Chart, error) {
 		return &Chart{}, nil
 	}
 	result := parsed.Chart.Result[0]
-	chart := &Chart{Currency: result.Meta.Currency}
+	chart := &Chart{Currency: result.Meta.Currency, Profile: result.Meta.profile()}
 	if len(result.Indicators.Quote) == 0 {
 		return chart, nil
 	}

@@ -770,6 +770,31 @@ components:
         - nodes
         - links
       type: object
+    HoldingSummary:
+      additionalProperties: false
+      properties:
+        dividends_net_czk:
+          $ref: "#/components/schemas/Amount"
+        first_bought_on:
+          format: date
+          type: string
+        invested_czk:
+          $ref: "#/components/schemas/Amount"
+          description: All purchases with fees.
+        realized_cost_czk:
+          $ref: "#/components/schemas/Amount"
+          description: What the sold lots cost; the gain's base for a percentage.
+        realized_gain_czk:
+          $ref: "#/components/schemas/Amount"
+        sold_quantity:
+          type: string
+      required:
+        - invested_czk
+        - sold_quantity
+        - realized_gain_czk
+        - realized_cost_czk
+        - dividends_net_czk
+      type: object
     ImportAccount:
       additionalProperties: false
       properties:
@@ -1035,6 +1060,9 @@ components:
       properties:
         instrument:
           $ref: "#/components/schemas/Instrument"
+        market:
+          $ref: "#/components/schemas/MarketProfile"
+          description: What Yahoo says about the symbol; absent until it is priced.
         position:
           $ref: "#/components/schemas/Position"
           description: Absent once everything is sold.
@@ -1043,6 +1071,9 @@ components:
           items:
             $ref: "#/components/schemas/SoldLot"
           type: array
+        summary:
+          $ref: "#/components/schemas/HoldingSummary"
+          description: The user's whole history with the instrument, in CZK.
         trades:
           description: Buys and dividends, oldest first.
           items:
@@ -1050,6 +1081,7 @@ components:
           type: array
       required:
         - instrument
+        - summary
         - trades
         - sales
       type: object
@@ -1193,6 +1225,55 @@ components:
           type: integer
       required:
         - applied_to_other
+      type: object
+    MarketProfile:
+      additionalProperties: false
+      properties:
+        currency:
+          description: The quote's.
+          type: string
+        day_high:
+          type: string
+        day_low:
+          type: string
+        day_volume:
+          format: int64
+          type: integer
+        exchange:
+          examples:
+            - NasdaqGS
+          type: string
+        exchange_timezone:
+          examples:
+            - America/New_York
+          type: string
+        fifty_two_week_high:
+          type: string
+        fifty_two_week_low:
+          type: string
+        first_trade_on:
+          description: When the symbol first traded.
+          format: date
+          type: string
+        instrument_type:
+          description: "Yahoo's type: EQUITY, ETF, MUTUALFUND, …"
+          type: string
+        long_name:
+          type: string
+        market_change_percent:
+          description: Change against the previous close, in percent.
+          type: string
+        market_price:
+          description: The last regular-session price.
+          type: string
+        market_time:
+          format: date-time
+          type: string
+        symbol:
+          type: string
+      required:
+        - symbol
+        - currency
       type: object
     MeOutputBody:
       additionalProperties: false
@@ -1404,6 +1485,9 @@ components:
     Position:
       additionalProperties: false
       properties:
+        account_id:
+          description: Only when positions are split per account.
+          type: string
         cost:
           $ref: "#/components/schemas/Amount"
           description: In the lots' currency; absent when lots were bought in different currencies.
@@ -3641,6 +3725,14 @@ paths:
     get:
       description: Agent tokens need the `investments:read` scope.
       operationId: get-portfolio
+      parameters:
+        - description: One position per instrument and account instead of one per instrument.
+          explode: false
+          in: query
+          name: per_account
+          schema:
+            description: One position per instrument and account instead of one per instrument.
+            type: boolean
       responses:
         "200":
           content:
@@ -3660,6 +3752,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
           description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
         "500":
           content:
             application/problem+json:
