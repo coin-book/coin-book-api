@@ -1,0 +1,113 @@
+{
+  "Format": "abo-gpc",
+  "Version": 1,
+  "PeriodFrom": "2026-10-01T00:00:00Z",
+  "PeriodTo": "2026-10-04T00:00:00Z",
+  "Accounts": [
+    {
+      "Ref": {
+        "Institution": "other",
+        "Kind": "current",
+        "Currency": "CZK",
+        "AccountNumber": "19-123457",
+        "ExternalRef": null,
+        "Name": "Běžný účet TEST"
+      },
+      "Rows": [
+        {
+          "Line": 2,
+          "BookedOn": "2026-10-01T00:00:00Z",
+          "AmountMinor": -124950,
+          "FeeMinor": 0,
+          "Description": "Elektrárna Test",
+          "Counterparty": "Elektrárna Test",
+          "CounterpartyAccount": "987654321/0800",
+          "OperationType": "",
+          "Message": "Záloha za říjen zákaznické číslo 42",
+          "VariableSymbol": "1234567890",
+          "ConstantSymbol": "308",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": null,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-01|-124950|0000000000001|987654321/0800|1234567890|308||Elektrárna Test"
+        },
+        {
+          "Line": 4,
+          "BookedOn": "2026-10-02T00:00:00Z",
+          "AmountMinor": 6200000,
+          "FeeMinor": 0,
+          "Description": "FIRMA TEST S.R.O.",
+          "Counterparty": "FIRMA TEST S.R.O.",
+          "CounterpartyAccount": "1111222233/2010",
+          "OperationType": "",
+          "Message": "",
+          "VariableSymbol": "2026001",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": null,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-02|6200000|0000000000002|1111222233/2010|2026001|||FIRMA TEST S.R.O."
+        },
+        {
+          "Line": 5,
+          "BookedOn": "2026-10-03T00:00:00Z",
+          "AmountMinor": -35000,
+          "FeeMinor": 0,
+          "Description": "Výběr z bankomatu",
+          "Counterparty": "",
+          "CounterpartyAccount": "",
+          "OperationType": "",
+          "Message": "Výběr z bankomatu",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": null,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-03|-35000|0000000000003|||||"
+        },
+        {
+          "Line": 7,
+          "BookedOn": "2026-10-03T00:00:00Z",
+          "AmountMinor": 12000,
+          "FeeMinor": 0,
+          "Description": "Elektrárna Test",
+          "Counterparty": "Elektrárna Test",
+          "CounterpartyAccount": "987654321/0800",
+          "OperationType": "STORNO",
+          "Message": "",
+          "VariableSymbol": "1234567890",
+          "ConstantSymbol": "308",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": null,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-03|12000|0000000000004|987654321/0800|1234567890|308||Elektrárna Test"
+        },
+        {
+          "Line": 9,
+          "BookedOn": "2026-10-04T00:00:00Z",
+          "AmountMinor": -24900,
+          "FeeMinor": 0,
+          "Description": "Kavárna",
+          "Counterparty": "Kavárna",
+          "CounterpartyAccount": "555666777/0300",
+          "OperationType": "",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": null,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-04|-24900|0000000000005|555666777/0300||||Kavárna"
+        }
+      ],
+      "Totals": null,
+      "DeclaredSum": 6027150,
+      "OpeningBalanceMinor": 1500000
+    }
+  ]
+}

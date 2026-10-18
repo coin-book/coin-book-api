@@ -66,6 +66,8 @@ type Account struct {
 	Totals *Totals
 	// DeclaredSum is the statement's sum of all movements; nil when the file has none.
 	DeclaredSum *int64
+	// OpeningBalanceMinor is the balance before the first row; nil when the file has none.
+	OpeningBalanceMinor *int64 `json:",omitempty"`
 	// Investments is set for a broker account (ADR 209).
 	Investments *Investments `json:",omitempty"`
 }

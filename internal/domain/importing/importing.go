@@ -21,6 +21,7 @@ import (
 
 	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/categorization"
+	"coin-book-api/internal/domain/importing/parser/abo"
 	"coin-book-api/internal/domain/importing/parser/generic"
 	"coin-book-api/internal/domain/importing/parser/mbankcz"
 	"coin-book-api/internal/domain/importing/parser/revolut"
@@ -42,7 +43,7 @@ var (
 )
 
 // parsers is the explicit registry; adding a bank means adding it here.
-var parsers = []statement.Parser{mbankcz.Parser{}, revolut.Parser{}, generic.Parser{}}
+var parsers = []statement.Parser{mbankcz.Parser{}, revolut.Parser{}, abo.Parser{}, generic.Parser{}}
 
 type Categorizer interface {
 	CategorizeNew(ctx context.Context, q db.Querier, candidates []categorization.Candidate) (categorization.AutoStats, error)
@@ -483,6 +484,9 @@ func (s *Service) ensureAccounts(ctx context.Context, tx pgx.Tx, p *plan) ([]uui
 // openingBalance is known only when the statement carries running balances: the
 // balance before the first row. Otherwise the user enters it on the account.
 func openingBalance(acc *statement.Account) int64 {
+	if acc.OpeningBalanceMinor != nil {
+		return *acc.OpeningBalanceMinor
+	}
 	if len(acc.Rows) == 0 {
 		return 0
 	}
