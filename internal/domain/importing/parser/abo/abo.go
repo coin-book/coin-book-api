@@ -80,6 +80,7 @@ func (Parser) Parse(r io.Reader) (*statement.Statement, error) {
 
 	st := &statement.Statement{Format: Format, Version: version}
 	accounts := map[string]*statement.Account{}
+	currencyCodes := map[*statement.Account]map[string]bool{}
 	var current *statement.Account
 	var last *statement.Row
 	lines := bufio.NewScanner(strings.NewReader(text))
@@ -96,8 +97,12 @@ func (Parser) Parse(r io.Reader) (*statement.Statement, error) {
 				return nil, eris.Wrapf(ErrNoStatementHeader, "line %d", lineNo)
 			}
 			var row statement.Row
-			if row, err = parseTransaction(record, current, lineNo); err == nil {
+			if row, err = parseTransaction(record, lineNo); err == nil {
 				current.Rows = append(current.Rows, row)
+				if currencyCodes[current] == nil {
+					currencyCodes[current] = map[string]bool{}
+				}
+				currencyCodes[current][field(record, 119, 122)] = true
 				last = &current.Rows[len(current.Rows)-1]
 			}
 		case messageFirst, messageSecond:
@@ -113,6 +118,7 @@ func (Parser) Parse(r io.Reader) (*statement.Statement, error) {
 		return nil, eris.Wrap(err, "read statement")
 	}
 	for _, acc := range st.Accounts {
+		acc.Ref.Currency = accountCurrency(currencyCodes[acc])
 		finishRows(acc)
 	}
 	setPeriod(st)
@@ -171,7 +177,7 @@ func accountFor(st *statement.Statement, byNumber map[string]*statement.Account,
 	return acc, nil
 }
 
-func parseTransaction(record []rune, acc *statement.Account, line int) (statement.Row, error) {
+func parseTransaction(record []rune, line int) (statement.Row, error) {
 	amount, err := strconv.ParseInt(field(record, 49, 60), 10, 64)
 	if err != nil {
 		return statement.Row{}, eris.Wrap(err, "amount")
@@ -188,15 +194,6 @@ func parseTransaction(record []rune, acc *statement.Account, line int) (statemen
 		row.AmountMinor, row.OperationType = -amount, reversalOperation
 	default:
 		return statement.Row{}, eris.Errorf("unknown posting code %q", record[60])
-	}
-	currency, err := currencyOf(field(record, 119, 122))
-	if err != nil {
-		return statement.Row{}, err
-	}
-	if acc.Ref.Currency == "" {
-		acc.Ref.Currency = currency
-	} else if acc.Ref.Currency != currency {
-		return statement.Row{}, eris.Errorf("currency %s in an account held in %s", currency, acc.Ref.Currency)
 	}
 	row.BookedOn, err = bookingDate(field(record, 123, 128), field(record, 92, 97))
 	if err != nil {
@@ -228,9 +225,6 @@ func appendMessage(row *statement.Row, record []rune) {
 // finishRows names each row once its message is known: the counterparty, else the
 // message, else the counterparty account.
 func finishRows(acc *statement.Account) {
-	if acc.Ref.Currency == "" {
-		acc.Ref.Currency = money.CZK
-	}
 	for i := range acc.Rows {
 		row := &acc.Rows[i]
 		for _, candidate := range []string{row.Counterparty, row.Message, row.CounterpartyAccount} {
@@ -256,20 +250,19 @@ func signedAmount(digits string, sign rune) (int64, error) {
 	return amount, nil
 }
 
-func currencyOf(code string) (money.Currency, error) {
-	trimmed := strings.TrimSpace(code)
-	if trimmed == "" || strings.Trim(trimmed, "0") == "" {
-		return money.CZK, nil
+// accountCurrency trusts columns 119-122 only when every row of the account carries
+// the same ISO code: some banks put their own operation code there (0114, 0306…).
+func accountCurrency(codes map[string]bool) money.Currency {
+	if len(codes) != 1 {
+		return money.CZK
 	}
-	numeric, err := strconv.Atoi(trimmed)
-	if err != nil {
-		return "", eris.Errorf("currency code %q", code)
+	for code := range codes {
+		numeric, err := strconv.Atoi(strings.TrimSpace(code))
+		if currency, ok := numericCurrencies[numeric]; err == nil && ok {
+			return currency
+		}
 	}
-	currency, ok := numericCurrencies[numeric]
-	if !ok {
-		return "", eris.Errorf("unsupported currency code %q", code)
-	}
-	return currency, nil
+	return money.CZK
 }
 
 // bookingDate prefers the posting date and falls back to the value date; banks

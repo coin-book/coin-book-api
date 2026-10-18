@@ -72,3 +72,25 @@ func TestRefusesTransactionBeforeHeader(t *testing.T) {
 	_, err := Parser{}.Parse(strings.NewReader("075" + strings.Repeat("0", 125) + "\n"))
 	assert.ErrorIs(t, err, ErrNoStatementHeader)
 }
+
+func TestOperationCodesInTheCurrencyColumnLeaveTheAccountInCZK(t *testing.T) {
+	raw, err := os.ReadFile("testdata/statement.gpc")
+	require.NoError(t, err)
+	lines := strings.Split(string(raw), "\r\n")
+	for i, code := range map[int]string{1: "0114", 3: "0306", 4: "0840"} {
+		lines[i] = lines[i][:118] + code + lines[i][122:]
+	}
+
+	st, err := Parser{}.Parse(strings.NewReader(strings.Join(lines, "\r\n")))
+	require.NoError(t, err)
+	assert.Equal(t, "CZK", string(st.Accounts[0].Ref.Currency))
+}
+
+func TestOneISOCodeOnEveryRowSetsTheCurrency(t *testing.T) {
+	raw, err := os.ReadFile("testdata/statement.gpc")
+	require.NoError(t, err)
+
+	st, err := Parser{}.Parse(strings.NewReader(strings.ReplaceAll(string(raw), "0203", "0978")))
+	require.NoError(t, err)
+	assert.Equal(t, "EUR", string(st.Accounts[0].Ref.Currency))
+}
