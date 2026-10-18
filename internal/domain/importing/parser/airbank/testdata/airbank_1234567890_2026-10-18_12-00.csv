@@ -1,0 +1,5 @@
+"Datum provedení","Typ úhrady","Měna účtu","Částka v měně účtu","Poplatek v měně účtu","Název protistrany","Číslo účtu protistrany","Variabilní symbol","Konstantní symbol","Specifický symbol","Zpráva pro příjemce","Poznámka k úhradě","Název karty","Datum zaúčtování","Referenční číslo","Kategorie plateb"
+"02/10/2026","Platba kartou","CZK","-1249,50","","ROHLIK.CZ","","","","","","Nákup potravin","Debetní karta","04/10/2026","100000001","Potraviny"
+"05/10/2026","Příchozí úhrada","CZK","62000,00","","FIRMA TEST S.R.O.","2000000001/0800","0002026001","","","Výplata 09/2026","","","05/10/2026","100000002","Příjmy"
+"07/10/2026","Odchozí úhrada","CZK","-500,00","-10,00","JAN TESTOVACI","19-1234567890/0100","","0308","","Za lístky","","","07/10/2026","100000003","Ostatní"
+"15/10/2026","Platba kartou","CZK","-89,00","","KAVARNA U TESTU","","","","","","","Debetní karta","","100000004","Restaurace"

@@ -1,0 +1,76 @@
+{
+  "Format": "airbank-cz",
+  "Version": 1,
+  "PeriodFrom": "2026-10-02T00:00:00Z",
+  "PeriodTo": "2026-10-07T00:00:00Z",
+  "Accounts": [
+    {
+      "Ref": {
+        "Institution": "other",
+        "Kind": "current",
+        "Currency": "CZK",
+        "AccountNumber": null,
+        "ExternalRef": null,
+        "Name": "Air Bank CZK"
+      },
+      "Rows": [
+        {
+          "Line": 2,
+          "BookedOn": "2026-10-02T00:00:00Z",
+          "AmountMinor": -124950,
+          "FeeMinor": 0,
+          "Description": "ROHLIK.CZ",
+          "Counterparty": "ROHLIK.CZ",
+          "CounterpartyAccount": "",
+          "OperationType": "Platba kartou",
+          "Message": "Nákup potravin",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Potraviny",
+          "BalanceAfterMinor": null,
+          "CategoryHint": "",
+          "IdentityKey": "ref:100000001"
+        },
+        {
+          "Line": 3,
+          "BookedOn": "2026-10-05T00:00:00Z",
+          "AmountMinor": 6200000,
+          "FeeMinor": 0,
+          "Description": "FIRMA TEST S.R.O.",
+          "Counterparty": "FIRMA TEST S.R.O.",
+          "CounterpartyAccount": "2000000001/0800",
+          "OperationType": "Příchozí úhrada",
+          "Message": "Výplata 09/2026",
+          "VariableSymbol": "2026001",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "Příjmy",
+          "BalanceAfterMinor": null,
+          "CategoryHint": "",
+          "IdentityKey": "ref:100000002"
+        },
+        {
+          "Line": 4,
+          "BookedOn": "2026-10-07T00:00:00Z",
+          "AmountMinor": -51000,
+          "FeeMinor": 1000,
+          "Description": "JAN TESTOVACI",
+          "Counterparty": "JAN TESTOVACI",
+          "CounterpartyAccount": "19-1234567890/0100",
+          "OperationType": "Odchozí úhrada",
+          "Message": "Za lístky",
+          "VariableSymbol": "",
+          "ConstantSymbol": "308",
+          "SpecificSymbol": "",
+          "BankCategory": "Ostatní",
+          "BalanceAfterMinor": null,
+          "CategoryHint": "",
+          "IdentityKey": "ref:100000003"
+        }
+      ],
+      "Totals": null,
+      "DeclaredSum": null
+    }
+  ]
+}

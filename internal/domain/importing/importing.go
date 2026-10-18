@@ -22,6 +22,7 @@ import (
 	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/categorization"
 	"coin-book-api/internal/domain/importing/parser/abo"
+	"coin-book-api/internal/domain/importing/parser/airbank"
 	"coin-book-api/internal/domain/importing/parser/generic"
 	"coin-book-api/internal/domain/importing/parser/mbankcz"
 	"coin-book-api/internal/domain/importing/parser/revolut"
@@ -43,7 +44,7 @@ var (
 )
 
 // parsers is the explicit registry; adding a bank means adding it here.
-var parsers = []statement.Parser{mbankcz.Parser{}, revolut.Parser{}, abo.Parser{}, generic.Parser{}}
+var parsers = []statement.Parser{mbankcz.Parser{}, revolut.Parser{}, abo.Parser{}, airbank.Parser{}, generic.Parser{}}
 
 type Categorizer interface {
 	CategorizeNew(ctx context.Context, q db.Querier, candidates []categorization.Candidate) (categorization.AutoStats, error)
@@ -254,7 +255,25 @@ func (s *Service) read(ctx context.Context, q db.Querier, u Upload) (*statement.
 	if err != nil {
 		return nil, nil, eris.Wrapf(ErrUnsupportedFormat, "%s: %v", parser.Format(), err)
 	}
+	if named, ok := parser.(fileNamedAccount); ok {
+		accountFromFileName(st, named.AccountNumberFromFileName(u.FileName))
+	}
 	return st, nil, nil
+}
+
+// fileNamedAccount is a parser for a bank that names the account in the export's file
+// name rather than in its content.
+type fileNamedAccount interface {
+	AccountNumberFromFileName(name string) string
+}
+
+// accountFromFileName gives the file's only account the number its name carries; with
+// several accounts (currencies) the name cannot say which one it is.
+func accountFromFileName(st *statement.Statement, number string) {
+	if number == "" || len(st.Accounts) != 1 || st.Accounts[0].Ref.AccountNumber != nil {
+		return
+	}
+	st.Accounts[0].Ref.AccountNumber = &number
 }
 
 // nameMappedAccounts names what a mapped file creates after its template, as the
