@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.0](https://github.com/coin-book/coin-book-api/compare/v1.0.0...v1.1.0) (2026-10-18)
+
+
+### Features
+
+* **api:** column mapper for any bank's CSV, kept as templates ([c25c506](https://github.com/coin-book/coin-book-api/commit/c25c5066f0f2f44c31d81361d3162666ab47d572))
+* **api:** import the ABO (GPC) statement every Czech bank exports ([a7f237f](https://github.com/coin-book/coin-book-api/commit/a7f237f0a75bf03cfe61e0c66b77966970a9bae2))
+* **api:** import the Air Bank account history CSV ([c7f431c](https://github.com/coin-book/coin-book-api/commit/c7f431cf1ce01d0ea86f785f7b1d0ce39e8a618c))
+* **api:** net worth with weekly trend, english category names and triage of a picked transaction ([b90ea3b](https://github.com/coin-book/coin-book-api/commit/b90ea3be1df5540ea5dc70e7c19c6e30e4c488d8))
+* **api:** positions per account, the symbol's market profile and the holding summary ([fceb1bd](https://github.com/coin-book/coin-book-api/commit/fceb1bdf790ae24429361ce21c0641050a1598d2))
+* **api:** recognise rows already imported from another bank format, refresh rows a newer parser reads better ([a2283c6](https://github.com/coin-book/coin-book-api/commit/a2283c652b16ab47398dd1f2668a2f2066c7de0d))
+
+
+### Bug Fixes
+
+* **api:** a mapped file's account is named after its template, its made-up reference is not shown ([7909887](https://github.com/coin-book/coin-book-api/commit/7909887fb8ac6d50472f6bfc8839d69d060d811c))
+* **api:** ABO import reads the currency column only when it holds one ISO code ([7d8eb4e](https://github.com/coin-book/coin-book-api/commit/7d8eb4e10fea3cbdf788fcf2d292d63493cb00f3))
+
 ## 1.0.0 (2026-10-18)
 
 
