@@ -72,7 +72,7 @@ func Demo(ctx context.Context, pool *db.Pool, importsDir string) error {
 		"demo-revolut.csv":     revolutCSV(revolut),
 		"demo-investments.csv": []byte(demoInvestmentsCSV),
 	} {
-		if _, err := importer.Commit(ctx, name, content, nil, false); err != nil && !errors.Is(err, importing.ErrAlreadyImported) {
+		if _, err := importer.Commit(ctx, importing.Upload{FileName: name, Content: content}, false); err != nil && !errors.Is(err, importing.ErrAlreadyImported) {
 			return eris.Wrapf(err, "import %s", name)
 		}
 	}

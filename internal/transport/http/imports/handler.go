@@ -14,6 +14,7 @@ import (
 
 	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/importing"
+	"coin-book-api/internal/domain/importing/parser/generic"
 	"coin-book-api/internal/platform/money"
 	"coin-book-api/internal/transport/http/apierr"
 	"coin-book-api/internal/transport/http/dto"
@@ -32,7 +33,59 @@ func NewHandler(service *importing.Service, maxUploadBytes int64) *Handler {
 type uploadForm struct {
 	File huma.FormFile `form:"file" contentType:"text/csv,text/plain,application/octet-stream" required:"true"`
 	// Mapping is JSON: {"<account key>": {"account_id": "…"} | {"create": {"name": "…", "kind": "current"}}}.
-	Mapping string `form:"mapping" required:"false" doc:"Where each statement account goes, keyed by accounts[].key from the preview; omitted keys take the suggestion."`
+	Mapping      string `form:"mapping" required:"false" doc:"Where each statement account goes, keyed by accounts[].key from the preview; omitted keys take the suggestion."`
+	Layout       string `form:"layout" required:"false" doc:"JSON ColumnLayout from the mapper: read the file as a CSV with these columns instead of detecting its format."`
+	TemplateName string `form:"template_name" required:"false" doc:"Commit only: keep the layout as a template under this name, so the next file of the same shape is read by it."`
+}
+
+type inspectForm struct {
+	File      huma.FormFile `form:"file" contentType:"text/csv,text/plain,application/octet-stream" required:"true"`
+	Encoding  string        `form:"encoding" required:"false" enum:"utf-8,windows-1250" doc:"Omit to guess."`
+	Delimiter string        `form:"delimiter" required:"false" doc:"One character; omit to guess."`
+}
+
+type inspectInput struct {
+	RawBody huma.MultipartFormFiles[inspectForm]
+}
+
+// ColumnLayout mirrors generic.Layout; columns map a field to its 0-based column.
+type ColumnLayout struct {
+	Encoding  string         `json:"encoding" enum:"utf-8,windows-1250"`
+	Delimiter string         `json:"delimiter" minLength:"1" maxLength:"1"`
+	HeaderRow int            `json:"header_row" minimum:"0" doc:"0-based row with the column names; data follows it."`
+	Columns   map[string]int `json:"columns" doc:"Field to 0-based column. Fields: date, amount, credit, debit, currency, description, counterparty, counterparty_account, bank_code, message, vs, ks, ss, balance_after, id."`
+	DateOrder string         `json:"date_order" enum:"dmy,mdy,ymd"`
+	Currency  string         `json:"currency,omitempty" doc:"The currency of every row when no column holds one."`
+}
+
+type TemplateRef struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+type inspectOutput struct {
+	Body struct {
+		Rows      [][]string   `json:"rows" doc:"The first rows of the file split into cells."`
+		Suggested ColumnLayout `json:"suggested"`
+		Template  *TemplateRef `json:"template,omitempty" doc:"A saved template that fits the file; suggested is its layout."`
+	}
+}
+
+type ImportTemplate struct {
+	ID        uuid.UUID    `json:"id"`
+	Name      string       `json:"name"`
+	Layout    ColumnLayout `json:"layout"`
+	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+type listTemplatesOutput struct {
+	Body struct {
+		Templates []ImportTemplate `json:"templates"`
+	}
+}
+
+type templateInput struct {
+	ID uuid.UUID `path:"id"`
 }
 
 type mappingTarget struct {
@@ -113,6 +166,7 @@ type ImportResult struct {
 	CategorizedBank  int                `json:"categorized_by_bank"`
 	TransfersMatched int                `json:"transfers_matched"`
 	OwnTransfers     int                `json:"own_transfers" doc:"Payments recognised as transfers to own accounts whose statements are not imported."`
+	Template         *TemplateRef       `json:"template,omitempty" doc:"The saved template the file was read by, or was saved as on commit."`
 }
 
 type resultOutput struct {
@@ -164,6 +218,20 @@ func (h *Handler) Register(api huma.API) {
 		Errors: []int{409, 413, 422},
 	}}, h.commit)
 	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "inspect-import", Method: http.MethodPost, Path: "/api/v1/imports/inspect", Tags: []string{"Imports"},
+		Summary: "Split an unknown CSV into cells and guess its column layout for the mapper", MaxBodyBytes: h.maxUploadBytes,
+		Errors: []int{413, 422},
+	}}, h.inspect)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "list-import-templates", Method: http.MethodGet, Path: "/api/v1/imports/templates", Tags: []string{"Imports"},
+		Summary: "Saved column layouts",
+	}}, h.listTemplates)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "delete-import-template", Method: http.MethodDelete, Path: "/api/v1/imports/templates/{id}",
+		Tags: []string{"Imports"}, Summary: "Forget a saved column layout", DefaultStatus: http.StatusNoContent,
+		Errors: []int{404},
+	}}, h.deleteTemplate)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
 		OperationID: "list-imports", Method: http.MethodGet, Path: "/api/v1/imports", Tags: []string{"Imports"},
 		Summary: "Import history",
 	}}, h.list)
@@ -178,11 +246,11 @@ func (h *Handler) preview(ctx context.Context, in *previewInput) (*resultOutput,
 	if err != nil {
 		return nil, err
 	}
-	mapping, err := parseMapping(in.RawBody.Data().Mapping)
+	upload, err := toUpload(in.RawBody.Data(), name, content)
 	if err != nil {
 		return nil, err
 	}
-	result, err := h.service.Preview(ctx, name, content, mapping)
+	result, err := h.service.Preview(ctx, upload)
 	if err != nil {
 		return nil, mapError(ctx, err)
 	}
@@ -194,11 +262,11 @@ func (h *Handler) commit(ctx context.Context, in *uploadInput) (*resultOutput, e
 	if err != nil {
 		return nil, err
 	}
-	mapping, err := parseMapping(in.RawBody.Data().Mapping)
+	upload, err := toUpload(in.RawBody.Data(), name, content)
 	if err != nil {
 		return nil, err
 	}
-	result, err := h.service.Commit(ctx, name, content, mapping, in.Force)
+	result, err := h.service.Commit(ctx, upload, in.Force)
 	if err != nil {
 		return nil, mapError(ctx, err)
 	}
@@ -233,6 +301,87 @@ func (h *Handler) rollback(ctx context.Context, in *rollbackInput) (*rollbackOut
 	out := &rollbackOutput{}
 	out.Body.Removed = removed
 	return out, nil
+}
+
+func (h *Handler) inspect(ctx context.Context, in *inspectInput) (*inspectOutput, error) {
+	form := in.RawBody.Data()
+	_, content, err := readFile(form.File)
+	if err != nil {
+		return nil, err
+	}
+	inspection, template, err := h.service.Inspect(ctx, content, generic.Encoding(form.Encoding), form.Delimiter)
+	if err != nil {
+		return nil, mapError(ctx, err)
+	}
+	out := &inspectOutput{}
+	out.Body.Rows = inspection.Rows
+	out.Body.Suggested = toColumnLayout(inspection.Suggested)
+	if template != nil {
+		out.Body.Template = &TemplateRef{ID: template.ID, Name: template.Name}
+	}
+	return out, nil
+}
+
+func (h *Handler) listTemplates(ctx context.Context, _ *struct{}) (*listTemplatesOutput, error) {
+	templates, err := h.service.Templates(ctx)
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := &listTemplatesOutput{}
+	out.Body.Templates = make([]ImportTemplate, len(templates))
+	for i, t := range templates {
+		out.Body.Templates[i] = ImportTemplate{ID: t.ID, Name: t.Name, Layout: toColumnLayout(t.Layout), UpdatedAt: t.UpdatedAt}
+	}
+	return out, nil
+}
+
+func (h *Handler) deleteTemplate(ctx context.Context, in *templateInput) (*struct{}, error) {
+	err := h.service.DeleteTemplate(ctx, in.ID)
+	switch {
+	case errors.Is(err, importing.ErrTemplateNotFound):
+		return nil, apierr.NotFound()
+	case err != nil:
+		return nil, apierr.Internal(ctx, err)
+	}
+	return nil, nil
+}
+
+func toUpload(form *uploadForm, name string, content []byte) (importing.Upload, error) {
+	mapping, err := parseMapping(form.Mapping)
+	if err != nil {
+		return importing.Upload{}, err
+	}
+	layout, err := parseLayout(form.Layout)
+	if err != nil {
+		return importing.Upload{}, err
+	}
+	return importing.Upload{FileName: name, Content: content, Mapping: mapping, Layout: layout,
+		SaveTemplateAs: form.TemplateName}, nil
+}
+
+func parseLayout(raw string) (*generic.Layout, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var wire ColumnLayout
+	if err := json.Unmarshal([]byte(raw), &wire); err != nil {
+		return nil, apierr.Validation("body.layout", "expected a JSON column layout")
+	}
+	layout := &generic.Layout{Encoding: generic.Encoding(wire.Encoding), Delimiter: wire.Delimiter, HeaderRow: wire.HeaderRow,
+		Columns: map[generic.Field]int{}, DateOrder: generic.DateOrder(wire.DateOrder), Currency: money.Currency(wire.Currency)}
+	for field, column := range wire.Columns {
+		layout.Columns[generic.Field(field)] = column
+	}
+	return layout, nil
+}
+
+func toColumnLayout(l generic.Layout) ColumnLayout {
+	columns := make(map[string]int, len(l.Columns))
+	for field, column := range l.Columns {
+		columns[string(field)] = column
+	}
+	return ColumnLayout{Encoding: string(l.Encoding), Delimiter: l.Delimiter, HeaderRow: l.HeaderRow, Columns: columns,
+		DateOrder: string(l.DateOrder), Currency: string(l.Currency)}
 }
 
 func readFile(f huma.FormFile) (string, []byte, error) {
@@ -281,6 +430,12 @@ func mapError(ctx context.Context, err error) error {
 		return apierr.Validation("body.mapping", "a new account needs a name")
 	case errors.Is(err, importing.ErrUnsupportedFormat):
 		return apierr.Unprocessable(apierr.CodeUnsupportedFormat)
+	case errors.Is(err, generic.ErrInvalidLayout):
+		return apierr.Unprocessable(apierr.CodeLayoutInvalid)
+	case errors.Is(err, generic.ErrLayoutMismatch):
+		return apierr.Unprocessable(apierr.CodeLayoutMismatch)
+	case errors.Is(err, importing.ErrInvalidTemplateName):
+		return apierr.Validation("body.template_name", "a template needs a name of at most 80 characters")
 	case errors.Is(err, importing.ErrChecksFailed):
 		return apierr.Conflict(apierr.CodeBalanceMismatch)
 	case errors.Is(err, importing.ErrAlreadyImported):
@@ -316,6 +471,9 @@ func toResult(r *importing.Result) ImportResult {
 	for i, row := range r.Rows {
 		out.Rows[i] = ImportPreviewRow{AccountKey: row.AccountRef, Line: row.Line, BookedOn: dto.Date(row.BookedOn),
 			Amount: row.Amount, Description: row.Description, Status: string(row.Status)}
+	}
+	if r.Template != nil {
+		out.Template = &TemplateRef{ID: r.Template.ID, Name: r.Template.Name}
 	}
 	return out
 }

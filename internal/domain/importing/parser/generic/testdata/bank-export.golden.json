@@ -1,0 +1,76 @@
+{
+  "Format": "mapped-csv",
+  "Version": 1,
+  "PeriodFrom": "2026-10-02T00:00:00Z",
+  "PeriodTo": "2026-10-05T00:00:00Z",
+  "Accounts": [
+    {
+      "Ref": {
+        "Institution": "other",
+        "Kind": "current",
+        "Currency": "CZK",
+        "AccountNumber": null,
+        "ExternalRef": "mapped:eb6ac15b67a48f59:CZK",
+        "Name": ""
+      },
+      "Rows": [
+        {
+          "Line": 6,
+          "BookedOn": "2026-10-02T00:00:00Z",
+          "AmountMinor": -124950,
+          "FeeMinor": 0,
+          "Description": "ROHLIK.CZ",
+          "Counterparty": "ROHLIK.CZ",
+          "CounterpartyAccount": "",
+          "OperationType": "",
+          "Message": "Nákup potravin",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": 875050,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-02|-124950|ROHLIK.CZ|ROHLIK.CZ|Nákup potravin"
+        },
+        {
+          "Line": 7,
+          "BookedOn": "2026-10-05T00:00:00Z",
+          "AmountMinor": 6200000,
+          "FeeMinor": 0,
+          "Description": "FIRMA TEST S.R.O.",
+          "Counterparty": "FIRMA TEST S.R.O.",
+          "CounterpartyAccount": "2000000001/0800",
+          "OperationType": "",
+          "Message": "Výplata 09/2026",
+          "VariableSymbol": "2026001",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": 7075050,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-05|6200000|FIRMA TEST S.R.O.|FIRMA TEST S.R.O.|Výplata 09/2026"
+        },
+        {
+          "Line": 8,
+          "BookedOn": "2026-10-05T00:00:00Z",
+          "AmountMinor": -8900,
+          "FeeMinor": 0,
+          "Description": "KAVARNA U TESTU",
+          "Counterparty": "KAVARNA U TESTU",
+          "CounterpartyAccount": "",
+          "OperationType": "",
+          "Message": "",
+          "VariableSymbol": "",
+          "ConstantSymbol": "",
+          "SpecificSymbol": "",
+          "BankCategory": "",
+          "BalanceAfterMinor": 7066150,
+          "CategoryHint": "",
+          "IdentityKey": "2026-10-05|-8900|KAVARNA U TESTU|KAVARNA U TESTU|"
+        }
+      ],
+      "Totals": null,
+      "DeclaredSum": null
+    }
+  ]
+}

@@ -103,16 +103,25 @@ func (c *client) upload(path, name string, content []byte, wantStatus int, out a
 // uploadMapped sends the import with a mapping form field, keyed by accounts[].key.
 func (c *client) uploadMapped(path, name string, content []byte, mapping map[string]any, wantStatus int, out any) {
 	c.t.Helper()
+	fields := map[string]string{}
+	if mapping != nil {
+		raw, err := json.Marshal(mapping)
+		require.NoError(c.t, err)
+		fields["mapping"] = string(raw)
+	}
+	c.uploadForm(path, name, content, fields, wantStatus, out)
+}
+
+func (c *client) uploadForm(path, name string, content []byte, fields map[string]string, wantStatus int, out any) {
+	c.t.Helper()
 	var buf bytes.Buffer
 	form := multipart.NewWriter(&buf)
 	part, err := form.CreateFormFile("file", name)
 	require.NoError(c.t, err)
 	_, err = part.Write(content)
 	require.NoError(c.t, err)
-	if mapping != nil {
-		raw, err := json.Marshal(mapping)
-		require.NoError(c.t, err)
-		require.NoError(c.t, form.WriteField("mapping", string(raw)))
+	for key, value := range fields {
+		require.NoError(c.t, form.WriteField(key, value))
 	}
 	require.NoError(c.t, form.Close())
 	req, err := http.NewRequest(http.MethodPost, c.server.URL+path, &buf)
@@ -219,6 +228,11 @@ type importResult struct {
 	TransfersMatched int             `json:"transfers_matched"`
 	CategorizedRule  int             `json:"categorized_by_rule"`
 	CategorizedBank  int             `json:"categorized_by_bank"`
+	Format           string          `json:"format"`
+	Template         *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"template"`
 }
 
 type transactionList struct {

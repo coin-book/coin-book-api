@@ -528,6 +528,45 @@ components:
       required:
         - amount_minor
       type: object
+    ColumnLayout:
+      additionalProperties: false
+      properties:
+        columns:
+          additionalProperties:
+            format: int64
+            type: integer
+          description: "Field to 0-based column. Fields: date, amount, credit, debit, currency, description, counterparty, counterparty_account, bank_code, message, vs, ks, ss, balance_after, id."
+          type: object
+        currency:
+          description: The currency of every row when no column holds one.
+          type: string
+        date_order:
+          enum:
+            - dmy
+            - mdy
+            - ymd
+          type: string
+        delimiter:
+          maxLength: 1
+          minLength: 1
+          type: string
+        encoding:
+          enum:
+            - utf-8
+            - windows-1250
+          type: string
+        header_row:
+          description: 0-based row with the column names; data follows it.
+          format: int64
+          minimum: 0
+          type: integer
+      required:
+        - encoding
+        - delimiter
+        - header_row
+        - columns
+        - date_order
+      type: object
     ConfirmOutputBody:
       additionalProperties: false
       properties:
@@ -1027,6 +1066,9 @@ components:
         rows_total:
           format: int64
           type: integer
+        template:
+          $ref: "#/components/schemas/TemplateRef"
+          description: The saved template the file was read by, or was saved as on commit.
         transfers_matched:
           format: int64
           type: integer
@@ -1048,6 +1090,43 @@ components:
         - categorized_by_bank
         - transfers_matched
         - own_transfers
+      type: object
+    ImportTemplate:
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        layout:
+          $ref: "#/components/schemas/ColumnLayout"
+        name:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - id
+        - name
+        - layout
+        - updated_at
+      type: object
+    InspectOutputBody:
+      additionalProperties: false
+      properties:
+        rows:
+          description: The first rows of the file split into cells.
+          items:
+            items:
+              type: string
+            type: array
+          type: array
+        suggested:
+          $ref: "#/components/schemas/ColumnLayout"
+        template:
+          $ref: "#/components/schemas/TemplateRef"
+          description: A saved template that fits the file; suggested is its layout.
+      required:
+        - rows
+        - suggested
       type: object
     Instrument:
       additionalProperties: false
@@ -1172,6 +1251,16 @@ components:
           type: array
       required:
         - imports
+      type: object
+    ListTemplatesOutputBody:
+      additionalProperties: false
+      properties:
+        templates:
+          items:
+            $ref: "#/components/schemas/ImportTemplate"
+          type: array
+      required:
+        - templates
       type: object
     ListTransactionsOutputBody:
       additionalProperties: false
@@ -1651,6 +1740,8 @@ components:
             - invalid_parent
             - invalid_request_body
             - invalid_symbol
+            - layout_invalid
+            - layout_mismatch
             - mapping_required
             - merge_into_itself
             - method_not_allowed
@@ -1923,6 +2014,17 @@ components:
       required:
         - categories
         - budget_groups
+      type: object
+    TemplateRef:
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required:
+        - id
+        - name
       type: object
     Trade:
       additionalProperties: false
@@ -3413,7 +3515,11 @@ paths:
             encoding:
               file:
                 contentType: text/csv,text/plain,application/octet-stream
+              layout:
+                contentType: text/plain
               mapping:
+                contentType: text/plain
+              template_name:
                 contentType: text/plain
             schema:
               properties:
@@ -3422,8 +3528,14 @@ paths:
                   contentMediaType: application/octet-stream
                   format: binary
                   type: string
+                layout:
+                  description: "JSON ColumnLayout from the mapper: read the file as a CSV with these columns instead of detecting its format."
+                  type: string
                 mapping:
                   description: Where each statement account goes, keyed by accounts[].key from the preview; omitted keys take the suggestion.
+                  type: string
+                template_name:
+                  description: "Commit only: keep the layout as a template under this name, so the next file of the same shape is read by it."
                   type: string
               required:
                 - file
@@ -3476,6 +3588,80 @@ paths:
       summary: Import a statement atomically
       tags:
         - Imports
+  /api/v1/imports/inspect:
+    post:
+      operationId: inspect-import
+      requestBody:
+        content:
+          multipart/form-data:
+            encoding:
+              delimiter:
+                contentType: text/plain
+              encoding:
+                contentType: text/plain
+              file:
+                contentType: text/csv,text/plain,application/octet-stream
+            schema:
+              properties:
+                delimiter:
+                  description: One character; omit to guess.
+                  type: string
+                encoding:
+                  description: Omit to guess.
+                  enum:
+                    - utf-8
+                    - windows-1250
+                  type: string
+                file:
+                  contentEncoding: binary
+                  contentMediaType: application/octet-stream
+                  format: binary
+                  type: string
+              required:
+                - file
+              type: object
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "413":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Request Entity Too Large
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Split an unknown CSV into cells and guess its column layout for the mapper
+      tags:
+        - Imports
   /api/v1/imports/preview:
     post:
       operationId: preview-import
@@ -3485,7 +3671,11 @@ paths:
             encoding:
               file:
                 contentType: text/csv,text/plain,application/octet-stream
+              layout:
+                contentType: text/plain
               mapping:
+                contentType: text/plain
+              template_name:
                 contentType: text/plain
             schema:
               properties:
@@ -3494,8 +3684,14 @@ paths:
                   contentMediaType: application/octet-stream
                   format: binary
                   type: string
+                layout:
+                  description: "JSON ColumnLayout from the mapper: read the file as a CSV with these columns instead of detecting its format."
+                  type: string
                 mapping:
                   description: Where each statement account goes, keyed by accounts[].key from the preview; omitted keys take the suggestion.
+                  type: string
+                template_name:
+                  description: "Commit only: keep the layout as a template under this name, so the next file of the same shape is read by it."
                   type: string
               required:
                 - file
@@ -3540,6 +3736,86 @@ paths:
       security:
         - bearerAuth: []
       summary: "Dry-run an import: parse, check and deduplicate without writing"
+      tags:
+        - Imports
+  /api/v1/imports/templates:
+    get:
+      operationId: list-import-templates
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTemplatesOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Saved column layouts
+      tags:
+        - Imports
+  /api/v1/imports/templates/{id}:
+    delete:
+      operationId: delete-import-template
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Forget a saved column layout
       tags:
         - Imports
   /api/v1/imports/{id}/rollback:

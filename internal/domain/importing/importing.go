@@ -134,6 +134,8 @@ type Result struct {
 	CategorizedBank  int
 	TransfersMatched int
 	OwnTransfers     int
+	// Template is the saved layout the file was read by, or was saved as on commit.
+	Template *TemplateRef
 }
 
 type plannedRow struct {
@@ -153,10 +155,22 @@ type plan struct {
 	content     []byte
 }
 
+// Upload is one statement file and what the user decided about it.
+type Upload struct {
+	FileName string
+	Content  []byte
+	// Mapping: nil takes the suggested target for every account.
+	Mapping Mapping
+	// Layout reads the file by columns drawn in the mapper; nil detects the format,
+	// then tries the user's saved templates.
+	Layout *generic.Layout
+	// SaveTemplateAs keeps Layout as a template once the import is committed; empty keeps none.
+	SaveTemplateAs string
+}
+
 // Preview runs the whole pipeline without writing anything (F-IMP-4 dry-run).
-// A nil mapping takes the suggested target for every account.
-func (s *Service) Preview(ctx context.Context, fileName string, content []byte, mapping Mapping) (*Result, error) {
-	p, err := s.plan(ctx, s.pool, fileName, content, mapping)
+func (s *Service) Preview(ctx context.Context, u Upload) (*Result, error) {
+	p, err := s.plan(ctx, s.pool, u)
 	if err != nil {
 		return nil, err
 	}
@@ -165,11 +179,11 @@ func (s *Service) Preview(ctx context.Context, fileName string, content []byte, 
 
 // Commit writes the statement in one transaction. Failing control checks stop it
 // unless force is set, which is recorded on the batch.
-func (s *Service) Commit(ctx context.Context, fileName string, content []byte, mapping Mapping, force bool) (*Result, error) {
+func (s *Service) Commit(ctx context.Context, u Upload, force bool) (*Result, error) {
 	var result *Result
 	var wroteInvestments bool
-	sum := sha256.Sum256(content)
-	pending, err := s.stageOriginal(content)
+	sum := sha256.Sum256(u.Content)
+	pending, err := s.stageOriginal(u.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +192,7 @@ func (s *Service) Commit(ctx context.Context, fileName string, content []byte, m
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('coinbook.import'), hashtext(current_user_id()::text))`); err != nil {
 			return eris.Wrap(err, "lock imports")
 		}
-		p, err := s.plan(ctx, tx, fileName, content, mapping)
+		p, err := s.plan(ctx, tx, u)
 		if err != nil {
 			return err
 		}
@@ -195,7 +209,14 @@ func (s *Service) Commit(ctx context.Context, fileName string, content []byte, m
 			return ErrChecksFailed
 		}
 		wroteInvestments = newRecords(p.investments)
-		return s.write(ctx, tx, p, force)
+		if err := s.write(ctx, tx, p, force); err != nil {
+			return err
+		}
+		if u.Layout == nil || u.SaveTemplateAs == "" {
+			return nil
+		}
+		p.result.Template, err = saveTemplate(ctx, tx, u.SaveTemplateAs, *u.Layout, u.Content)
+		return err
 	})
 	if err != nil {
 		_ = os.Remove(pending)
@@ -207,15 +228,41 @@ func (s *Service) Commit(ctx context.Context, fileName string, content []byte, m
 	return result, s.keepOriginal(pending, hex.EncodeToString(sum[:]))
 }
 
-func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, content []byte, mapping Mapping) (*plan, error) {
-	parser := detect(content)
+// read parses the file: by the mapper's layout, by a parser certain of the format, by a
+// saved template, and last by a parser that only finds the format likely (coin-book CSV),
+// so a template the user drew beats a guess.
+func (s *Service) read(ctx context.Context, q db.Querier, u Upload) (*statement.Statement, *TemplateRef, error) {
+	if u.Layout != nil {
+		st, err := generic.ParseLayout(u.Content, *u.Layout)
+		return st, nil, err
+	}
+	parser, confidence := detect(u.Content)
+	if confidence < statement.Certain {
+		template, err := templateFor(ctx, q, u.Content)
+		if err != nil {
+			return nil, nil, err
+		}
+		if template != nil {
+			st, err := generic.ParseLayout(u.Content, template.Layout)
+			return st, &TemplateRef{ID: template.ID, Name: template.Name}, err
+		}
+	}
 	if parser == nil {
-		return nil, ErrUnsupportedFormat
+		return nil, nil, ErrUnsupportedFormat
 	}
-	st, err := parser.Parse(bytes.NewReader(content))
+	st, err := parser.Parse(bytes.NewReader(u.Content))
 	if err != nil {
-		return nil, eris.Wrapf(ErrUnsupportedFormat, "%s: %v", parser.Format(), err)
+		return nil, nil, eris.Wrapf(ErrUnsupportedFormat, "%s: %v", parser.Format(), err)
 	}
+	return st, nil, nil
+}
+
+func (s *Service) plan(ctx context.Context, q db.Querier, u Upload) (*plan, error) {
+	st, template, err := s.read(ctx, q, u)
+	if err != nil {
+		return nil, err
+	}
+	fileName, content, mapping := u.FileName, u.Content, u.Mapping
 
 	owner, err := currentUser(ctx, q)
 	if err != nil {
@@ -224,7 +271,7 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 	sum := sha256.Sum256(content)
 	p := &plan{st: st, content: content, result: &Result{
 		FileName: filepath.Base(fileName), FileHash: hex.EncodeToString(sum[:]),
-		Format: st.Format, PeriodFrom: st.PeriodFrom, PeriodTo: st.PeriodTo, ChecksPassed: true,
+		Format: st.Format, PeriodFrom: st.PeriodFrom, PeriodTo: st.PeriodTo, ChecksPassed: true, Template: template,
 	}}
 	// A file read by an older parser version may hold what that version skipped (Revolut's
 	// investments before ADR 209); its rows dedupe by id, so importing it again is safe.
@@ -319,7 +366,7 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 	return p, nil
 }
 
-func detect(content []byte) statement.Parser {
+func detect(content []byte) (statement.Parser, statement.Confidence) {
 	head := content[:min(len(content), detectHeadBytes)]
 	var best statement.Parser
 	bestConfidence := statement.NoMatch
@@ -328,7 +375,7 @@ func detect(content []byte) statement.Parser {
 			best, bestConfidence = parser, c
 		}
 	}
-	return best
+	return best, bestConfidence
 }
 
 // currentUser is the user the connection is scoped to; an import outside a user's

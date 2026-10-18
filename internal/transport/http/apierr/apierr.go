@@ -45,6 +45,8 @@ const (
 	CodeMergeIntoItself   Code = "merge_into_itself"
 	CodeAccountExists     Code = "account_exists"
 	CodeUnknownBank       Code = "unknown_bank"
+	CodeLayoutInvalid     Code = "layout_invalid"
+	CodeLayoutMismatch    Code = "layout_mismatch"
 
 	CodeSplitMismatch  Code = "split_mismatch"
 	CodeNothingToMatch Code = "nothing_to_match"
@@ -93,6 +95,8 @@ var details = map[Code]string{ //nolint:gosec // G101: error descriptions, not c
 	CodeMergeIntoItself:     "An account cannot be merged into itself.",
 	CodeAccountExists:       "An account with this number already exists.",
 	CodeUnknownBank:         "That bank is not in the register.",
+	CodeLayoutInvalid:       "The column mapping is incomplete: it needs a date, an amount (or credit and debit), a description and a currency.",
+	CodeLayoutMismatch:      "The file does not fit the column mapping: a row's date or amount cannot be read.",
 	CodeSplitMismatch:       "The category lines do not add up to the transaction amount.",
 	CodeNothingToMatch:      "The transaction has no value a rule could match on.",
 	CodeNotPairable:         "These transactions cannot form a transfer.",

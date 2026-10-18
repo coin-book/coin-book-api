@@ -1,0 +1,10 @@
+Výpis z účtu;;;;;;;;
+Číslo účtu:;1234567890/0300;;;;;;;
+Období:;01.10.2026 - 15.10.2026;;;;;;;
+;;;;;;;;
+Datum zaúčtování;Název protiúčtu;Protiúčet;Kód banky;Zpráva pro příjemce;VS;Příjem;Výdaj;Zůstatek
+02.10.2026;ROHLIK.CZ;;;Nákup potravin;;;"1 249,50";"8 750,50"
+05.10.2026;FIRMA TEST S.R.O.;2000000001;0800;Výplata 09/2026;0002026001;"62 000,00";;"70 750,50"
+05.10.2026 14:31;KAVARNA U TESTU;;;;;;-89,00;"70 661,50"
+;;;;;;;;
+Celkem;;;;;;"62 000,00";"1 338,50";
