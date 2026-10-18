@@ -25,11 +25,11 @@ func (r *Repo) or(q db.Querier) db.Querier {
 	return q
 }
 
-const categoryColumns = `id, code, parent_id, name_cs, name_sk, kind, color_key, icon, budget_group_id, sort, custom`
+const categoryColumns = `id, code, parent_id, name_cs, name_sk, name_en, kind, color_key, icon, budget_group_id, sort, custom`
 
 func scanCategory(row pgx.CollectableRow) (Category, error) {
 	var c Category
-	err := row.Scan(&c.ID, &c.Code, &c.ParentID, &c.NameCS, &c.NameSK, &c.Kind, &c.ColorKey, &c.Icon, &c.BudgetGroupID, &c.Sort, &c.Custom)
+	err := row.Scan(&c.ID, &c.Code, &c.ParentID, &c.NameCS, &c.NameSK, &c.NameEN, &c.Kind, &c.ColorKey, &c.Icon, &c.BudgetGroupID, &c.Sort, &c.Custom)
 	return c, err
 }
 
@@ -43,13 +43,13 @@ func (r *Repo) Categories(ctx context.Context, q db.Querier) ([]Category, error)
 }
 
 func (r *Repo) BudgetGroups(ctx context.Context) ([]BudgetGroup, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, code, name_cs, name_sk, sort FROM budget_group ORDER BY sort`)
+	rows, err := r.pool.Query(ctx, `SELECT id, code, name_cs, name_sk, name_en, sort FROM budget_group ORDER BY sort`)
 	if err != nil {
 		return nil, eris.Wrap(err, "list budget groups")
 	}
 	groups, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (BudgetGroup, error) {
 		var g BudgetGroup
-		err := row.Scan(&g.ID, &g.Code, &g.NameCS, &g.NameSK, &g.Sort)
+		err := row.Scan(&g.ID, &g.Code, &g.NameCS, &g.NameSK, &g.NameEN, &g.Sort)
 		return g, err
 	})
 	return groups, eris.Wrap(err, "read budget groups")
@@ -203,14 +203,15 @@ func collectSuggestions(rows pgx.Rows) ([]Suggestion, error) {
 	return s, eris.Wrap(err, "read suggestions")
 }
 
-func (r *Repo) nextUncategorized(ctx context.Context, skip []string) (string, error) {
+// nextUncategorized prefers focus when it is still waiting; an empty focus picks the newest.
+func (r *Repo) nextUncategorized(ctx context.Context, skip []string, focus string) (string, error) {
 	var id string
 	err := r.pool.QueryRow(ctx, `
 		SELECT t.id FROM transaction t
 		WHERE NOT EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id)
 		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
 		  AND NOT (t.id = ANY($1))
-		ORDER BY t.booked_on DESC, t.id LIMIT 1`, skip).Scan(&id)
+		ORDER BY t.id = $2 DESC, t.booked_on DESC, t.id LIMIT 1`, skip, focus).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}

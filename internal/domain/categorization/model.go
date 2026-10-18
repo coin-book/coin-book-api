@@ -44,6 +44,7 @@ type Category struct {
 	ParentID      *uuid.UUID
 	NameCS        string
 	NameSK        string
+	NameEN        string
 	Kind          Kind
 	ColorKey      *string
 	Icon          *string
@@ -58,6 +59,7 @@ type BudgetGroup struct {
 	Code   string
 	NameCS string
 	NameSK string
+	NameEN string
 	Sort   int
 }
 

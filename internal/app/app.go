@@ -69,6 +69,7 @@ func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) *App {
 	importer := importing.NewService(pool, accountRepo, categorizer, transferService, prices, cfg.Storage.ImportsDir)
 	google := googleauth.New(cfg.Google, cfg.Server.PublicURL+auth.GoogleCallbackPath)
 
+	investmentService := investment.NewService(investment.NewRepo(pool), c)
 	handler, api := httppkg.NewAPI(httppkg.Deps{
 		Config: cfg, Pool: pool, Sessions: sessions, Tokens: tokens,
 		BuildVersion: build.Version, BuildCommit: build.Commit,
@@ -79,10 +80,10 @@ func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) *App {
 		Categories:   categories.NewHandler(categoryRepo),
 		Transfers:    transfers.NewHandler(transferService),
 		Budgets:      budgets.NewHandler(budget.NewService(pool, spendingRepo, categoryRepo, c)),
-		Reports:      reports.NewHandler(report.NewService(spendingRepo)),
+		Reports:      reports.NewHandler(report.NewService(spendingRepo), accountRepo, investmentService),
 		AgentTokens:  agenttokens.NewHandler(tokens),
 		Settings:     settingshttp.NewHandler(settingsRepo, categorizer),
-		Investments:  investments.NewHandler(investment.NewService(investment.NewRepo(pool), c), prices, c),
+		Investments:  investments.NewHandler(investmentService, prices, c),
 	})
 	return &App{Handler: handler, API: api, Prices: prices}
 }

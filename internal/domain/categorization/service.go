@@ -59,11 +59,12 @@ func (s *Service) CategorizeNew(ctx context.Context, q db.Querier, candidates []
 		return AutoStats{}, err
 	}
 	byCode := make(map[string]uuid.UUID, len(cats))
-	byName := make(map[string]uuid.UUID, 2*len(cats))
+	byName := make(map[string]uuid.UUID, 3*len(cats))
 	for _, c := range cats {
 		byCode[c.Code] = c.ID
 		byName[normalize(c.NameCS)] = c.ID
 		byName[normalize(c.NameSK)] = c.ID
+		byName[normalize(c.NameEN)] = c.ID
 	}
 
 	threshold, err := s.thresholds.Threshold(ctx, q)
@@ -242,13 +243,14 @@ type Triage struct {
 	QuickPicks    []Suggestion
 }
 
-// NextForTriage returns the newest uncategorised transaction not in skip, with
-// category suggestions; an empty TransactionID means nothing is left to show.
-func (s *Service) NextForTriage(ctx context.Context, remaining int, skip []string) (*Triage, error) {
+// NextForTriage returns focus if it is still uncategorised, else the newest uncategorised
+// transaction not in skip, with category suggestions; an empty TransactionID means nothing
+// is left to show.
+func (s *Service) NextForTriage(ctx context.Context, remaining int, skip []string, focus string) (*Triage, error) {
 	if skip == nil {
 		skip = []string{}
 	}
-	id, err := s.repo.nextUncategorized(ctx, skip)
+	id, err := s.repo.nextUncategorized(ctx, skip, focus)
 	if err != nil || id == "" {
 		return &Triage{Remaining: remaining}, err
 	}

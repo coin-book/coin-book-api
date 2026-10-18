@@ -36,6 +36,7 @@ type portfolio struct {
 			Minor    int64  `json:"minor"`
 			Currency string `json:"currency"`
 		} `json:"value"`
+		Trend    []string `json:"trend"`
 		ValueCZK *struct {
 			Minor int64 `json:"minor"`
 		} `json:"value_czk"`
@@ -112,6 +113,7 @@ func TestRevolutInvestmentsBecomePositionsValuedAtMarketPrices(t *testing.T) {
 	assert.True(t, aapl.IncompleteHistory, "two shares sold from a 2022 purchase that was never imported")
 	require.NotNil(t, aapl.Value)
 	assert.Equal(t, int64(150000), aapl.Value.Minor)
+	assert.Equal(t, []string{"300"}, aapl.Trend)
 	assert.Equal(t, int64(3000000), aapl.ValueCZK.Minor)
 	require.Len(t, aapl.Lots, 1)
 	assert.Equal(t, "2029-01-16", aapl.Lots[0].ExemptFrom)
@@ -409,4 +411,39 @@ func TestPositionsCanBeSplitPerAccount(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"5", "1"}, apple)
 	assert.Equal(t, together.ValueCZK.Minor, split.ValueCZK.Minor)
+}
+
+func TestNetWorthAddsAccountsAndInvestmentsInCZK(t *testing.T) {
+	c := newMarketClient(t)
+	c.upload("/api/v1/imports", "mbank.csv", mbankStatement(t, ownMBankAccount, octoberRows), http.StatusCreated, nil)
+	c.upload("/api/v1/imports", "investments.csv", investmentStatement(t), http.StatusCreated, nil)
+	require.Zero(t, c.prices.Refresh(context.Background()))
+
+	var accounts struct {
+		Accounts []struct {
+			Balance struct {
+				Minor    int64  `json:"minor"`
+				Currency string `json:"currency"`
+			} `json:"balance"`
+		} `json:"accounts"`
+	}
+	c.do(http.MethodGet, "/api/v1/accounts", nil, http.StatusOK, &accounts)
+	var cash int64
+	for _, a := range accounts.Accounts {
+		if a.Balance.Currency == "CZK" {
+			cash += a.Balance.Minor
+		}
+	}
+
+	var worth struct {
+		Total       struct{ Minor int64 } `json:"total_czk"`
+		Cash        struct{ Minor int64 } `json:"cash_czk"`
+		Investments struct{ Minor int64 } `json:"investments_czk"`
+		Unconverted []string              `json:"unconverted"`
+	}
+	c.do(http.MethodGet, "/api/v1/reports/net-worth", nil, http.StatusOK, &worth)
+	assert.Equal(t, cash, worth.Cash.Minor, "the broker accounts hold no cash of their own")
+	assert.Equal(t, int64(3000000+344125), worth.Investments.Minor, "5 AAPL at 300 $ by 20 Kč, 1.37654322 EUNL at 100 € by 25 Kč")
+	assert.Equal(t, worth.Cash.Minor+worth.Investments.Minor, worth.Total.Minor)
+	assert.Empty(t, worth.Unconverted)
 }

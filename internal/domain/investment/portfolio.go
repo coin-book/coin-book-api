@@ -34,7 +34,9 @@ type Position struct {
 	// CostCZKMinor is nil when a lot has no CZK cost.
 	CostCZKMinor *int64
 	// Quote is nil without a price; the position is then valued at cost.
-	Quote      *Quote
+	Quote *Quote
+	// Trend is the last year's weekly closes, oldest first; empty without prices.
+	Trend      []decimal.Decimal
 	ValueMinor *int64
 	// ValueCZKMinor is nil without a price or without an exchange rate.
 	ValueCZKMinor        *int64
@@ -156,6 +158,10 @@ func (s *Service) positions(ctx context.Context, h *history, perAccount bool) ([
 	if err != nil {
 		return nil, err
 	}
+	trends, err := s.repo.weeklyCloses(ctx, symbols, clock.Today(s.clock).AddDate(-1, 0, 0))
+	if err != nil {
+		return nil, err
+	}
 	rates, err := s.repo.latestRates(ctx)
 	if err != nil {
 		return nil, err
@@ -173,6 +179,7 @@ func (s *Service) positions(ctx context.Context, h *history, perAccount bool) ([
 			if q, ok := quotes[*pos.Instrument.YahooSymbol]; ok {
 				pos.value(q, rates)
 			}
+			pos.Trend = trends[*pos.Instrument.YahooSymbol]
 		}
 		positions = append(positions, *pos)
 	}
@@ -357,4 +364,51 @@ func (s *Service) SetYahooSymbol(ctx context.Context, isin, symbol string) error
 		return ErrInvalidSymbol
 	}
 	return s.repo.SetYahooSymbol(ctx, isin, &symbol)
+}
+
+// NetWorth is cash on the accounts plus the investments' market value, in CZK (F-INV-2).
+type NetWorth struct {
+	CashCZKMinor        int64
+	InvestmentsCZKMinor int64
+	// Unconverted lists currencies held on accounts without a ČNB rate yet; those balances are left out.
+	Unconverted []money.Currency
+	// UnvaluedPositions counts positions without a price or rate, left out of InvestmentsCZKMinor.
+	UnvaluedPositions int
+}
+
+func (n NetWorth) TotalCZKMinor() int64 { return n.CashCZKMinor + n.InvestmentsCZKMinor }
+
+// NetWorth adds the given account balances, converted at the latest ČNB rates, to the portfolio's value.
+func (s *Service) NetWorth(ctx context.Context, balances []money.Amount) (*NetWorth, error) {
+	rates, err := s.repo.latestRates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n := &NetWorth{Unconverted: []money.Currency{}}
+	for _, b := range balances {
+		inCZK, ok := toCZK(b.Minor, b.Currency, rates)
+		if !ok {
+			if !slices.Contains(n.Unconverted, b.Currency) {
+				n.Unconverted = append(n.Unconverted, b.Currency)
+			}
+			continue
+		}
+		n.CashCZKMinor += inCZK
+	}
+	h, err := s.repo.history(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	positions, err := s.positions(ctx, h, false)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range positions {
+		if p.ValueCZKMinor == nil {
+			n.UnvaluedPositions++
+			continue
+		}
+		n.InvestmentsCZKMinor += *p.ValueCZKMinor
+	}
+	return n, nil
 }

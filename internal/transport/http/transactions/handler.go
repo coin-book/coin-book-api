@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
@@ -144,6 +145,7 @@ type Suggestion struct {
 
 type triageInput struct {
 	Skip []string `query:"skip" maxItems:"100" doc:"Transactions the user skipped in this session."`
+	ID   string   `query:"id" maxLength:"64" doc:"Show this transaction while it is still uncategorised, even if skipped; otherwise the next one."`
 }
 
 type triageOutput struct {
@@ -297,7 +299,7 @@ func (h *Handler) triage(ctx context.Context, in *triageInput) (*triageOutput, e
 	if err != nil {
 		return nil, apierr.Internal(ctx, err)
 	}
-	next, err := h.categorizer.NextForTriage(ctx, remaining, in.Skip)
+	next, err := h.categorizer.NextForTriage(ctx, remaining, withoutFocus(in.Skip, in.ID), in.ID)
 	if err != nil {
 		return nil, apierr.Internal(ctx, err)
 	}
@@ -311,6 +313,11 @@ func (h *Handler) triage(ctx context.Context, in *triageInput) (*triageOutput, e
 		}
 	}
 	return out, nil
+}
+
+// withoutFocus lets a transaction the user picks from the queue show even when it was skipped.
+func withoutFocus(skip []string, focus string) []string {
+	return slices.DeleteFunc(slices.Clone(skip), func(id string) bool { return id == focus })
 }
 
 func predictions(in []categorization.Prediction) []Prediction {

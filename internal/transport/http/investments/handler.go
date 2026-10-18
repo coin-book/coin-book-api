@@ -64,6 +64,7 @@ type Position struct {
 	Cost              *money.Amount `json:"cost,omitempty" doc:"In the lots' currency; absent when lots were bought in different currencies."`
 	CostCZK           *money.Amount `json:"cost_czk,omitempty" doc:"Absent when a lot has no CZK cost."`
 	Quote             *Quote        `json:"quote,omitempty" doc:"Absent without a usable price."`
+	Trend             []string      `json:"trend" doc:"The last year's weekly closes, oldest first, in the quote's currency; empty without prices."`
 	Value             *money.Amount `json:"value,omitempty"`
 	ValueCZK          *money.Amount `json:"value_czk,omitempty" doc:"Absent without a price or an exchange rate."`
 	DividendsNetCZK   money.Amount  `json:"dividends_net_czk"`
@@ -424,6 +425,10 @@ func positionDTO(p investment.Position) Position {
 	if !p.MixedCurrencies {
 		cost := money.New(p.CostMinor, p.CostCurrency)
 		out.Cost = &cost
+	}
+	out.Trend = make([]string, len(p.Trend))
+	for i, c := range p.Trend {
+		out.Trend[i] = c.String()
 	}
 	if p.Quote != nil {
 		out.Quote = &Quote{Day: dto.Date(p.Quote.Day), Close: p.Quote.Close.String(), Currency: string(p.Quote.Currency)}

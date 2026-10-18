@@ -16,6 +16,7 @@ type taxonomyCategory struct {
 	ParentID *string `json:"parent_id"`
 	NameCS   string  `json:"name_cs"`
 	NameSK   string  `json:"name_sk"`
+	NameEN   string  `json:"name_en"`
 	Kind     string  `json:"kind"`
 	ColorKey *string `json:"color_key"`
 	Custom   bool    `json:"custom"`
@@ -57,6 +58,8 @@ func TestCategoriesCanBeAddedWithReadableCodes(t *testing.T) {
 		"kind": "expense", "color_key": "limeta", "icon": "dog"})
 	assert.Equal(t, "domaci_mazlicci", pets.Code)
 	assert.Equal(t, "Domácí mazlíčci", pets.NameSK, "a user's own category has one name in every locale")
+	assert.Equal(t, "Domácí mazlíčci", pets.NameEN)
+	assert.Equal(t, "Housing and utilities", c.taxonomy()[c.categoryID("housing")].NameEN)
 
 	var renamed taxonomyCategory
 	c.do(http.MethodPatch, "/api/v1/categories/"+pets.ID, map[string]any{"name": "Zvířata"}, http.StatusOK, &renamed)

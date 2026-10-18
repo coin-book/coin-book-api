@@ -27,6 +27,7 @@ type Category struct {
 	ParentID      *uuid.UUID `json:"parent_id,omitempty"`
 	NameCS        string     `json:"name_cs"`
 	NameSK        string     `json:"name_sk"`
+	NameEN        string     `json:"name_en"`
 	Kind          string     `json:"kind" enum:"income,expense,financial,transfer"`
 	ColorKey      *string    `json:"color_key,omitempty" doc:"Theme token key; absent on a subcategory, which uses its parent's."`
 	Icon          *string    `json:"icon,omitempty"`
@@ -46,6 +47,7 @@ type BudgetGroup struct {
 	Code   string    `json:"code"`
 	NameCS string    `json:"name_cs"`
 	NameSK string    `json:"name_sk"`
+	NameEN string    `json:"name_en"`
 	Sort   int       `json:"sort"`
 }
 
@@ -180,7 +182,7 @@ func (h *Handler) list(ctx context.Context, _ *struct{}) (*taxonomyOutput, error
 	}
 	out.Body.BudgetGroups = make([]BudgetGroup, len(groups))
 	for i, g := range groups {
-		out.Body.BudgetGroups[i] = BudgetGroup{ID: g.ID, Code: g.Code, NameCS: g.NameCS, NameSK: g.NameSK, Sort: g.Sort}
+		out.Body.BudgetGroups[i] = BudgetGroup{ID: g.ID, Code: g.Code, NameCS: g.NameCS, NameSK: g.NameSK, NameEN: g.NameEN, Sort: g.Sort}
 	}
 	httpapi.CountResults(ctx, len(cats))
 	return out, nil
@@ -283,7 +285,7 @@ func (h *Handler) deleteRule(ctx context.Context, in *deleteRuleInput) (*struct{
 }
 
 func toCategory(c categorization.Category) Category {
-	return Category{ID: c.ID, Code: c.Code, ParentID: c.ParentID, NameCS: c.NameCS, NameSK: c.NameSK, Kind: string(c.Kind),
+	return Category{ID: c.ID, Code: c.Code, ParentID: c.ParentID, NameCS: c.NameCS, NameSK: c.NameSK, NameEN: c.NameEN, Kind: string(c.Kind),
 		ColorKey: c.ColorKey, Icon: c.Icon, BudgetGroupID: c.BudgetGroupID, Sort: c.Sort, Custom: c.Custom}
 }
 

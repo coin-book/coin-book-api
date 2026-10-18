@@ -280,6 +280,31 @@ func (r *Repo) marketProfile(ctx context.Context, symbol string) (*MarketProfile
 	return &profiles[0], nil
 }
 
+// weeklyCloses are each symbol's last close of every week since from, oldest first.
+func (r *Repo) weeklyCloses(ctx context.Context, symbols []string, from time.Time) (map[string][]decimal.Decimal, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT symbol, (array_agg(close ORDER BY day DESC))[1]::text
+		FROM price_bar WHERE symbol = ANY($1) AND day >= $2
+		GROUP BY symbol, date_trunc('week', day) ORDER BY symbol, date_trunc('week', day)`, symbols, from)
+	if err != nil {
+		return nil, eris.Wrap(err, "weekly closes")
+	}
+	defer rows.Close()
+	closes := map[string][]decimal.Decimal{}
+	for rows.Next() {
+		var symbol, value string
+		if err := rows.Scan(&symbol, &value); err != nil {
+			return nil, eris.Wrap(err, "read weekly close")
+		}
+		d, err := decimal.NewFromString(value)
+		if err != nil {
+			return nil, eris.Wrap(err, "read weekly close")
+		}
+		closes[symbol] = append(closes[symbol], d)
+	}
+	return closes, eris.Wrap(rows.Err(), "read weekly closes")
+}
+
 // seriesCurrency is nil until the symbol's prices are fetched.
 func (r *Repo) seriesCurrency(ctx context.Context, symbol string) (*money.Currency, error) {
 	var currency *money.Currency

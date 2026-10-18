@@ -128,3 +128,24 @@ func TestRepeatedChoiceSuggestsARule(t *testing.T) {
 	assert.Equal(t, "KADERNICTVI EVA", result.SuggestedRule.Counterparty)
 	assert.Equal(t, 3, result.SuggestedRule.Times)
 }
+
+func TestTriageShowsTheTransactionPickedFromTheQueue(t *testing.T) {
+	c := newClient(t)
+	c.upload("/api/v1/imports", "october.csv", mbankStatement(t, ownMBankAccount, []row{
+		{"2026-10-10", "OBCHOD JEDNA  PLATBA KARTOU", "Neznámá", -10000},
+		{"2026-10-12", "OBCHOD DVA  PLATBA KARTOU", "Neznámá", -20000},
+	}), http.StatusCreated, nil)
+	queue := c.transactions("uncategorized=true")
+	require.Len(t, queue.Transactions, 2)
+	older := queue.Transactions[len(queue.Transactions)-1].ID
+
+	var triage struct {
+		Transaction struct {
+			ID string `json:"id"`
+		} `json:"transaction"`
+	}
+	c.do(http.MethodGet, "/api/v1/triage", nil, http.StatusOK, &triage)
+	assert.NotEqual(t, older, triage.Transaction.ID, "the newest comes first")
+	c.do(http.MethodGet, "/api/v1/triage?id="+older+"&skip="+older, nil, http.StatusOK, &triage)
+	assert.Equal(t, older, triage.Transaction.ID, "a pick from the queue wins over skipping it")
+}
