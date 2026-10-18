@@ -214,6 +214,8 @@ type importResult struct {
 	RowsTotal        int             `json:"rows_total"`
 	RowsNew          int             `json:"rows_new"`
 	RowsDuplicate    int             `json:"rows_duplicate"`
+	RowsInOther      int             `json:"rows_in_other_statement"`
+	RowsRefreshed    int             `json:"rows_refreshed"`
 	TransfersMatched int             `json:"transfers_matched"`
 	CategorizedRule  int             `json:"categorized_by_rule"`
 	CategorizedBank  int             `json:"categorized_by_bank"`

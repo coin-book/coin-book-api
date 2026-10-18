@@ -80,6 +80,8 @@ type RowStatus string
 const (
 	RowNew       RowStatus = "new"
 	RowDuplicate RowStatus = "duplicate"
+	// RowInOtherStatement is already in the target account from another bank format.
+	RowInOtherStatement RowStatus = "in_other_statement"
 )
 
 type PreviewRow struct {
@@ -109,19 +111,23 @@ type AccountResult struct {
 }
 
 type Result struct {
-	BatchID          *uuid.UUID
-	FileName         string
-	FileHash         string
-	Format           statement.Format
-	PeriodFrom       *time.Time
-	PeriodTo         *time.Time
-	AlreadyImported  bool
-	ChecksPassed     bool
-	Accounts         []AccountResult
-	Rows             []PreviewRow
-	RowsTotal        int
-	RowsNew          int
-	RowsDuplicate    int
+	BatchID         *uuid.UUID
+	FileName        string
+	FileHash        string
+	Format          statement.Format
+	PeriodFrom      *time.Time
+	PeriodTo        *time.Time
+	AlreadyImported bool
+	ChecksPassed    bool
+	Accounts        []AccountResult
+	Rows            []PreviewRow
+	RowsTotal       int
+	RowsNew         int
+	// RowsDuplicate includes RowsInOtherStatement.
+	RowsDuplicate        int
+	RowsInOtherStatement int
+	// RowsRefreshed are known rows a newer parser version reads more out of; the import rewrites them.
+	RowsRefreshed    int
 	CategorizedFile  int
 	CategorizedModel int
 	CategorizedRule  int
@@ -134,6 +140,8 @@ type plannedRow struct {
 	id      string
 	account int
 	row     statement.Row
+	// inOtherStatement rows are not written: the account holds them from another format.
+	inOtherStatement bool
 }
 
 type plan struct {
@@ -258,17 +266,29 @@ func (s *Service) plan(ctx context.Context, q db.Querier, fileName string, conte
 		}
 	}
 
-	known, err := existingIDs(ctx, q, p.rows)
+	known, err := existingRows(ctx, q, p.rows, st.Format, st.Version)
 	if err != nil {
+		return nil, err
+	}
+	if err := markRowsInOtherStatements(ctx, q, p, known); err != nil {
 		return nil, err
 	}
 	for _, r := range p.rows {
 		status := RowNew
-		if known[r.id] {
+		switch stored, isKnown := known[r.id]; {
+		case isKnown:
 			status = RowDuplicate
 			p.result.Accounts[r.account].Duplicates++
 			p.result.RowsDuplicate++
-		} else {
+			if stored.outdatedBy(r.row) {
+				p.result.RowsRefreshed++
+			}
+		case r.inOtherStatement:
+			status = RowInOtherStatement
+			p.result.Accounts[r.account].Duplicates++
+			p.result.RowsDuplicate++
+			p.result.RowsInOtherStatement++
+		default:
 			p.result.Accounts[r.account].New++
 			p.result.RowsNew++
 		}
@@ -341,24 +361,47 @@ func transactionIDs(acc *statement.Account, owner, identity string) []string {
 	return ids
 }
 
-func existingIDs(ctx context.Context, q db.Querier, rows []plannedRow) (map[string]bool, error) {
+// storedRow is the part of a known transaction its statement determines.
+type storedRow struct {
+	counterparty, counterpartyAccount, operationType, message    string
+	variableSymbol, constantSymbol, specificSymbol, bankCategory string
+	// olderParser: an earlier version of this file's parser wrote it.
+	olderParser bool
+}
+
+func (s storedRow) outdatedBy(r statement.Row) bool {
+	return s.olderParser && s != storedRow{olderParser: true, counterparty: r.Counterparty,
+		counterpartyAccount: r.CounterpartyAccount, operationType: r.OperationType, message: r.Message,
+		variableSymbol: r.VariableSymbol, constantSymbol: r.ConstantSymbol, specificSymbol: r.SpecificSymbol,
+		bankCategory: r.BankCategory}
+}
+
+func existingRows(ctx context.Context, q db.Querier, rows []plannedRow, format statement.Format, version int) (map[string]storedRow, error) {
 	ids := make([]string, len(rows))
 	for i, r := range rows {
 		ids[i] = r.id
 	}
-	result, err := q.Query(ctx, `SELECT id FROM transaction WHERE id = ANY($1)`, ids)
+	result, err := q.Query(ctx, `
+		SELECT t.id, coalesce(t.counterparty, ''), coalesce(t.counterparty_account, ''), coalesce(t.operation_type, ''),
+			coalesce(t.message, ''), coalesce(t.variable_symbol, ''), coalesce(t.constant_symbol, ''),
+			coalesce(t.specific_symbol, ''), coalesce(t.bank_category, ''), b.format = $2 AND b.parser_version < $3
+		FROM transaction t JOIN import_batch b ON b.id = t.import_batch_id
+		WHERE t.id = ANY($1)`, ids, string(format), version)
 	if err != nil {
 		return nil, eris.Wrap(err, "find existing transactions")
 	}
-	found, err := pgx.CollectRows(result, pgx.RowTo[string])
-	if err != nil {
-		return nil, eris.Wrap(err, "read existing transactions")
+	defer result.Close()
+	known := map[string]storedRow{}
+	for result.Next() {
+		var id string
+		var r storedRow
+		if err := result.Scan(&id, &r.counterparty, &r.counterpartyAccount, &r.operationType, &r.message,
+			&r.variableSymbol, &r.constantSymbol, &r.specificSymbol, &r.bankCategory, &r.olderParser); err != nil {
+			return nil, eris.Wrap(err, "read existing transactions")
+		}
+		known[id] = r
 	}
-	known := make(map[string]bool, len(found))
-	for _, id := range found {
-		known[id] = true
-	}
-	return known, nil
+	return known, eris.Wrap(result.Err(), "read existing transactions")
 }
 
 func (s *Service) write(ctx context.Context, tx pgx.Tx, p *plan, forced bool) error {
@@ -504,8 +547,14 @@ func insertTransactions(ctx context.Context, tx pgx.Tx, p *plan, accountIDs []uu
 	columns := []string{"id", "account_id", "booked_on", "amount_minor", "currency", "fee_minor", "description",
 		"counterparty", "counterparty_account", "operation_type", "message", "variable_symbol", "constant_symbol",
 		"specific_symbol", "bank_category", "balance_after_minor", "import_batch_id", "source_line"}
-	_, err := tx.CopyFrom(ctx, pgx.Identifier{"import_staging"}, columns, pgx.CopyFromSlice(len(p.rows), func(i int) ([]any, error) {
-		r := p.rows[i]
+	var written []plannedRow
+	for _, r := range p.rows {
+		if !r.inOtherStatement {
+			written = append(written, r)
+		}
+	}
+	_, err := tx.CopyFrom(ctx, pgx.Identifier{"import_staging"}, columns, pgx.CopyFromSlice(len(written), func(i int) ([]any, error) {
+		r := written[i]
 		row := r.row
 		return []any{r.id, accountIDs[r.account], row.BookedOn, row.AmountMinor, string(p.accounts[r.account].src.Ref.Currency),
 			row.FeeMinor, row.Description, nullable(row.Counterparty), nullable(row.CounterpartyAccount),
@@ -528,7 +577,26 @@ func insertTransactions(ctx context.Context, tx pgx.Tx, p *plan, accountIDs []uu
 			&c.OperationType, &c.VariableSymbol, &c.BankCategory)
 		return c, err
 	})
-	return inserted, eris.Wrap(err, "read inserted transactions")
+	if err != nil {
+		return nil, eris.Wrap(err, "read inserted transactions")
+	}
+	return inserted, refreshKnownRows(ctx, tx, p.st)
+}
+
+// refreshKnownRows rewrites what an older version of the same parser read from rows
+// this file holds too. Users never edit these columns; categories live elsewhere.
+func refreshKnownRows(ctx context.Context, tx pgx.Tx, st *statement.Statement) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE transaction t SET counterparty = s.counterparty, counterparty_account = s.counterparty_account,
+			operation_type = s.operation_type, message = s.message, variable_symbol = s.variable_symbol,
+			constant_symbol = s.constant_symbol, specific_symbol = s.specific_symbol, bank_category = s.bank_category
+		FROM import_staging s, import_batch old
+		WHERE t.id = s.id AND old.id = t.import_batch_id AND old.format = $1 AND old.parser_version < $2
+			AND (t.counterparty, t.counterparty_account, t.operation_type, t.message, t.variable_symbol,
+				t.constant_symbol, t.specific_symbol, t.bank_category)
+			IS DISTINCT FROM (s.counterparty, s.counterparty_account, s.operation_type, s.message, s.variable_symbol,
+				s.constant_symbol, s.specific_symbol, s.bank_category)`, string(st.Format), st.Version)
+	return eris.Wrap(err, "refresh known transactions")
 }
 
 func nullable(s string) *string {

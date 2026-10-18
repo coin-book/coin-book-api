@@ -21,7 +21,7 @@ import (
 
 const Format statement.Format = "mbank-cz"
 
-const version = 1
+const version = 2
 
 const columnHeader = "#Datum operace;#Popis operace;#Účet;#Kategorie;#Částka"
 
@@ -36,7 +36,7 @@ var (
 	accountNumberPattern  = regexp.MustCompile(`(\d{1,6})-(\d{1,10})/(\d{4})`)
 	periodPattern         = regexp.MustCompile(`^(\d{2}\.\d{2}\.\d{4});(\d{2}\.\d{2}\.\d{4})`)
 	counterpartyAccount   = regexp.MustCompile(`^(\d{6}) (\d{10}) (\d{4})$`)
-	paymentSymbol         = regexp.MustCompile(`^(VS|KS|SS):(\d+)$`)
+	paymentSymbol         = regexp.MustCompile(`\b(VS|KS|SS):(\d+)`)
 	segmentSeparator      = regexp.MustCompile(`\s{2,}`)
 	summaryCurrencyColumn = regexp.MustCompile(`^[A-Z]{3}$`)
 )
@@ -223,18 +223,10 @@ func splitDescription(raw string, row *statement.Row) {
 			row.CounterpartyAccount = NormalizeAccountNumber(m[1], m[2], m[3])
 		case row.OperationType == "" && operationTypes[segment]:
 			row.OperationType = segment
-		case paymentSymbol.MatchString(segment):
-			m := paymentSymbol.FindStringSubmatch(segment)
-			switch m[1] {
-			case "VS":
-				row.VariableSymbol = m[2]
-			case "KS":
-				row.ConstantSymbol = m[2]
-			case "SS":
-				row.SpecificSymbol = m[2]
-			}
 		default:
-			rest = append(rest, segment)
+			if text := takePaymentSymbols(segment, row); text != "" {
+				rest = append(rest, text)
+			}
 		}
 	}
 	if len(rest) > 0 {
@@ -242,6 +234,23 @@ func splitDescription(raw string, row *statement.Row) {
 		rest = rest[1:]
 	}
 	row.Message = strings.Join(rest, " / ")
+}
+
+// takePaymentSymbols moves VS/KS/SS into the row and returns what is left of the
+// segment: mBank glues symbols to the message ("NAJEMNE KS:0308 VS:2026001").
+func takePaymentSymbols(segment string, row *statement.Row) string {
+	for _, m := range paymentSymbol.FindAllStringSubmatch(segment, -1) {
+		value := strings.TrimLeft(m[2], "0")
+		switch m[1] {
+		case "VS":
+			row.VariableSymbol = value
+		case "KS":
+			row.ConstantSymbol = value
+		case "SS":
+			row.SpecificSymbol = value
+		}
+	}
+	return strings.Trim(collapseSpaces(paymentSymbol.ReplaceAllString(segment, "")), " ,")
 }
 
 // NormalizeAccountNumber renders a Czech account number as "prefix-number/bank"

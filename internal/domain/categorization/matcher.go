@@ -39,7 +39,12 @@ func matches(r Rule, c Candidate) bool {
 		containsOrAny(r.MatchDescription, c.Description) &&
 		equalOrAny(r.MatchCounterpartyAccount, c.CounterpartyAccount) &&
 		equalOrAny(r.MatchOperationType, c.OperationType) &&
-		equalOrAny(r.MatchVariableSymbol, c.VariableSymbol)
+		symbolEqualOrAny(r.MatchVariableSymbol, c.VariableSymbol)
+}
+
+// symbolEqualOrAny ignores leading zeros: banks pad symbols to their field width, rules are typed without.
+func symbolEqualOrAny(want *string, got string) bool {
+	return want == nil || strings.TrimLeft(strings.TrimSpace(*want), "0") == strings.TrimLeft(strings.TrimSpace(got), "0")
 }
 
 func equalOrAny(want *string, got string) bool {

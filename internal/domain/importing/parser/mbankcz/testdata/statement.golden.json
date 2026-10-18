@@ -1,6 +1,6 @@
 {
   "Format": "mbank-cz",
-  "Version": 1,
+  "Version": 2,
   "PeriodFrom": "2026-10-01T00:00:00Z",
   "PeriodTo": "2026-10-14T00:00:00Z",
   "Accounts": [
@@ -97,7 +97,7 @@
           "OperationType": "VLASTNÍ PŘEVOD",
           "Message": "",
           "VariableSymbol": "42",
-          "ConstantSymbol": "0308",
+          "ConstantSymbol": "308",
           "SpecificSymbol": "",
           "BankCategory": "Převod mezi vlastními účty",
           "BalanceAfterMinor": null,

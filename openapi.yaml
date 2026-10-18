@@ -952,6 +952,7 @@ components:
           enum:
             - new
             - duplicate
+            - in_other_statement
           type: string
       required:
         - account_key
@@ -1009,9 +1010,18 @@ components:
             $ref: "#/components/schemas/ImportPreviewRow"
           type: array
         rows_duplicate:
+          description: Includes rows_in_other_statement.
+          format: int64
+          type: integer
+        rows_in_other_statement:
+          description: Rows the target account already holds from another format of the same bank account; not written.
           format: int64
           type: integer
         rows_new:
+          format: int64
+          type: integer
+        rows_refreshed:
+          description: Known rows a newer parser reads more out of (payment symbols, counterparty); the import rewrites them.
           format: int64
           type: integer
         rows_total:
@@ -1030,6 +1040,8 @@ components:
         - rows_total
         - rows_new
         - rows_duplicate
+        - rows_in_other_statement
+        - rows_refreshed
         - categorized_by_file
         - categorized_by_model
         - categorized_by_rule

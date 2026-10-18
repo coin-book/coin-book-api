@@ -185,9 +185,9 @@ func parseRow(get func(string) string, currency money.Currency, line int) (state
 		Counterparty:        get("counterparty"),
 		CounterpartyAccount: get("counterparty_account"),
 		Message:             get("message"),
-		VariableSymbol:      get("vs"),
-		ConstantSymbol:      get("ks"),
-		SpecificSymbol:      get("ss"),
+		VariableSymbol:      strings.TrimLeft(get("vs"), "0"),
+		ConstantSymbol:      strings.TrimLeft(get("ks"), "0"),
+		SpecificSymbol:      strings.TrimLeft(get("ss"), "0"),
 		CategoryHint:        get("category"),
 	}
 	if row.Description == "" {

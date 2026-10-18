@@ -154,8 +154,12 @@ func (r *Repo) FindByIdentity(ctx context.Context, q db.Querier, number, externa
 		c := bank.CanonicalNumber(*number)
 		canonical = &c
 	}
+	// ABO statements name the account without its bank code; it still is the same account.
 	a, err := scan(q.QueryRow(ctx, `SELECT `+columns+` FROM account a
 		WHERE ($1::text IS NOT NULL AND a.account_number = ANY(ARRAY[$1, $3])) OR ($2::text IS NOT NULL AND a.external_ref = $2)
+			OR ($1::text IS NOT NULL AND (strpos($1, '/') = 0) <> (strpos(a.account_number, '/') = 0)
+				AND split_part(a.account_number, '/', 1) = split_part($1, '/', 1))
+		ORDER BY a.account_number = ANY(ARRAY[$1, $3]) OR a.external_ref = $2 DESC NULLS LAST
 		LIMIT 1`, number, externalRef, canonical))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

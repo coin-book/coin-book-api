@@ -89,7 +89,7 @@ type ImportPreviewRow struct {
 	BookedOn    string       `json:"booked_on" format:"date"`
 	Amount      money.Amount `json:"amount"`
 	Description string       `json:"description"`
-	Status      string       `json:"status" enum:"new,duplicate"`
+	Status      string       `json:"status" enum:"new,duplicate,in_other_statement"`
 }
 
 type ImportResult struct {
@@ -104,7 +104,9 @@ type ImportResult struct {
 	Rows             []ImportPreviewRow `json:"rows" doc:"The first 500 rows with their status."`
 	RowsTotal        int                `json:"rows_total"`
 	RowsNew          int                `json:"rows_new"`
-	RowsDuplicate    int                `json:"rows_duplicate"`
+	RowsDuplicate    int                `json:"rows_duplicate" doc:"Includes rows_in_other_statement."`
+	RowsInOther      int                `json:"rows_in_other_statement" doc:"Rows the target account already holds from another format of the same bank account; not written."`
+	RowsRefreshed    int                `json:"rows_refreshed" doc:"Known rows a newer parser reads more out of (payment symbols, counterparty); the import rewrites them."`
 	CategorizedFile  int                `json:"categorized_by_file" doc:"Rows whose category column named a known category."`
 	CategorizedModel int                `json:"categorized_by_model" doc:"Rows the classifier categorised above the auto threshold; they await confirmation."`
 	CategorizedRule  int                `json:"categorized_by_rule"`
@@ -292,7 +294,8 @@ func toResult(r *importing.Result) ImportResult {
 	out := ImportResult{
 		BatchID: r.BatchID, FileName: r.FileName, Format: string(r.Format), PeriodFrom: dto.DatePtr(r.PeriodFrom),
 		PeriodTo: dto.DatePtr(r.PeriodTo), AlreadyImported: r.AlreadyImported, ChecksPassed: r.ChecksPassed,
-		RowsTotal: r.RowsTotal, RowsNew: r.RowsNew, RowsDuplicate: r.RowsDuplicate, CategorizedFile: r.CategorizedFile, CategorizedModel: r.CategorizedModel,
+		RowsTotal: r.RowsTotal, RowsNew: r.RowsNew, RowsDuplicate: r.RowsDuplicate,
+		RowsInOther: r.RowsInOtherStatement, RowsRefreshed: r.RowsRefreshed, CategorizedFile: r.CategorizedFile, CategorizedModel: r.CategorizedModel,
 		CategorizedRule: r.CategorizedRule,
 		CategorizedBank: r.CategorizedBank, TransfersMatched: r.TransfersMatched, OwnTransfers: r.OwnTransfers,
 		Accounts: make([]ImportAccount, len(r.Accounts)), Rows: make([]ImportPreviewRow, len(r.Rows)),

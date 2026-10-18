@@ -31,6 +31,13 @@ func TestMatcherCounterpartyIsExactNotSubstring(t *testing.T) {
 	assert.Nil(t, m.Match(Candidate{Counterparty: "ALBERT HEIJN"}))
 }
 
+func TestMatcherVariableSymbolIgnoresLeadingZeros(t *testing.T) {
+	m := NewMatcher([]Rule{{CategoryID: uuid.New(), MatchVariableSymbol: ptr("0002026001")}})
+
+	assert.NotNil(t, m.Match(Candidate{VariableSymbol: "2026001"}))
+	assert.Nil(t, m.Match(Candidate{VariableSymbol: "20260010"}))
+}
+
 func TestBankHintsPointAtSeededCodes(t *testing.T) {
 	for bank, code := range bankCategoryHints {
 		assert.NotEmpty(t, code, bank)
