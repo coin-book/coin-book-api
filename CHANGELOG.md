@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/coin-book/coin-book-api/compare/v1.1.0...v1.2.0) (2026-10-20)
+
+
+### Features
+
+* **api:** net worth, mortgages with an offset reserve, Fingood and Portu imports ([c08a40c](https://github.com/coin-book/coin-book-api/commit/c08a40c9e2235b37e823afc5519bf613a6a5cec6))
+
 ## [1.1.0](https://github.com/coin-book/coin-book-api/compare/v1.0.0...v1.1.0) (2026-10-18)
 
 
