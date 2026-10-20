@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,4 +104,53 @@ func TestEveryUserTableIsProtectedByRowSecurity(t *testing.T) {
 	assert.Equal(t, 1, visible)
 	require.NoError(t, pg.Pool.QueryRow(ctx, `SELECT count(*) FROM account`).Scan(&visible))
 	assert.Zero(t, visible, "without a user scope the policies hide every row")
+}
+
+// Link rows (categories, transfers) carry their owner; writing one onto another user's
+// transaction or account, or under another owner, must be refused by row-level security.
+func TestLinkRowsCannotReachAnotherUsersTransactions(t *testing.T) {
+	alice := newClient(t)
+	bob := alice.signUp("bob@coinbook.local")
+	alice.upload("/api/v1/imports", "mbank.csv", mbankStatement(t, ownMBankAccount, octoberRows), http.StatusCreated, nil)
+	bob.upload("/api/v1/imports", "mbank.csv", mbankStatement(t, ownMBankAccount, octoberRows), http.StatusCreated, nil)
+
+	ctx := context.Background()
+	owner, err := pgx.Connect(ctx, pg.DSN)
+	require.NoError(t, err)
+	defer owner.Close(ctx)
+	var aliceID, bobID uuid.UUID
+	require.NoError(t, owner.QueryRow(ctx, `SELECT id FROM app_user WHERE email = 'bob@coinbook.local'`).Scan(&bobID))
+	require.NoError(t, owner.QueryRow(ctx, `SELECT id FROM app_user WHERE email <> 'bob@coinbook.local'`).Scan(&aliceID))
+	var aliceTx, bobTx, bobOtherTx string
+	var aliceAccount, bobAccount uuid.UUID
+	require.NoError(t, owner.QueryRow(ctx, `SELECT id, account_id FROM transaction WHERE user_id = $1 LIMIT 1`, aliceID).Scan(&aliceTx, &aliceAccount))
+	require.NoError(t, owner.QueryRow(ctx, `SELECT min(id), max(id) FROM transaction WHERE user_id = $1`, bobID).Scan(&bobTx, &bobOtherTx))
+	require.NoError(t, owner.QueryRow(ctx, `SELECT account_id FROM transaction WHERE id = $1`, bobTx).Scan(&bobAccount))
+
+	bobCtx, release, err := pg.Pool.ScopeToUser(ctx, bobID)
+	require.NoError(t, err)
+	defer release()
+	refused := map[string][]any{
+		`INSERT INTO not_transfer (transaction_id) VALUES ($1)`:                                       {aliceTx},
+		`INSERT INTO not_transfer (transaction_id, user_id) VALUES ($1, $2)`:                          {bobTx, aliceID},
+		`INSERT INTO transfer_pair (out_tx_id, in_tx_id, matched_by) VALUES ($1, $2, 'manual')`:       {bobTx, aliceTx},
+		`INSERT INTO transfer_pair (out_tx_id, in_tx_id, matched_by) VALUES ($2, $1, 'manual')`:       {bobTx, aliceTx},
+		`INSERT INTO own_transfer (transaction_id, account_id, matched_by) VALUES ($1, $2, 'manual')`: {bobTx, aliceAccount},
+		`INSERT INTO category_assignment (transaction_id, system_category_id, amount_minor, source)
+			SELECT $1, id, 1, 'manual' FROM category WHERE parent_id IS NOT NULL LIMIT 1`: {aliceTx},
+	}
+	for sql, args := range refused {
+		_, err := pg.Pool.Exec(bobCtx, sql, args...)
+		var pgErr *pgconn.PgError
+		require.ErrorAs(t, err, &pgErr, sql)
+		assert.Equal(t, "42501", pgErr.Code, sql)
+	}
+
+	_, err = pg.Pool.Exec(bobCtx, `INSERT INTO own_transfer (transaction_id, account_id, matched_by) VALUES ($1, $2, 'manual')`, bobOtherTx, bobAccount)
+	require.NoError(t, err, "a one-leg transfer within the user's own data")
+	var aliceRows int
+	require.NoError(t, pg.Pool.QueryRow(bobCtx, `
+		SELECT (SELECT count(*) FROM category_assignment WHERE user_id = $1) + (SELECT count(*) FROM own_transfer WHERE user_id = $1)`,
+		aliceID).Scan(&aliceRows))
+	assert.Zero(t, aliceRows)
 }

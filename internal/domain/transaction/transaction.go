@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rotisserie/eris"
 
+	"coin-book-api/internal/domain/transfer"
 	"coin-book-api/internal/platform/db"
 	"coin-book-api/internal/platform/money"
 )
@@ -92,7 +93,7 @@ type Repo struct {
 
 func NewRepo(pool *db.Pool) *Repo { return &Repo{pool: pool} }
 
-const listQuery = `
+var listQuery = `
 	SELECT t.id, t.account_id, t.booked_on, t.amount_minor, t.currency, t.fee_minor, t.description, t.counterparty,
 		t.counterparty_account, t.operation_type, t.message, t.variable_symbol, t.constant_symbol, t.specific_symbol,
 		t.bank_category, t.balance_after_minor, t.import_batch_id, t.source_line,
@@ -115,7 +116,7 @@ const listQuery = `
 		OR unaccent(t.counterparty) ILIKE '%' || unaccent($5) || '%'
 		OR ($12::bigint IS NOT NULL AND CASE WHEN $13 THEN t.amount_minor = $12 ELSE abs(t.amount_minor) = $12 END))
 	  AND (NOT $6 OR (NOT EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id)
-		AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)))
+		AND ` + transfer.NotALeg("t") + `))
 	  AND ($7::date IS NULL OR (t.booked_on, t.id) < ($7, $8))
 	  AND ($10::text IS NULL OR t.id = $10)
 	  AND (NOT $11 OR EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id AND ca.source = 'model'))
@@ -170,7 +171,7 @@ func (r *Repo) CountUncategorized(ctx context.Context) (int, error) {
 	err := r.pool.QueryRow(ctx, `
 		SELECT count(*) FROM transaction t
 		WHERE NOT EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id)
-		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)`).Scan(&n)
+		  AND `+transfer.NotALeg("t")+``).Scan(&n)
 	return n, eris.Wrap(err, "count uncategorized")
 }
 

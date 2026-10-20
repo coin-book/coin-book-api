@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rotisserie/eris"
 
+	"coin-book-api/internal/domain/transfer"
 	"coin-book-api/internal/platform/db"
 )
 
@@ -170,7 +171,7 @@ func (r *Repo) reassignable(ctx context.Context, q db.Querier) ([]Candidate, err
 	rows, err := q.Query(ctx, `
 		SELECT `+candidateColumns+` FROM transaction t
 		WHERE NOT EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id AND ca.source NOT IN ('bank', 'model'))
-		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)`)
+		  AND `+transfer.NotALeg("t")+``)
 	if err != nil {
 		return nil, eris.Wrap(err, "list reassignable transactions")
 	}
@@ -209,7 +210,7 @@ func (r *Repo) nextUncategorized(ctx context.Context, skip []string, focus strin
 	err := r.pool.QueryRow(ctx, `
 		SELECT t.id FROM transaction t
 		WHERE NOT EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id)
-		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
+		  AND `+transfer.NotALeg("t")+`
 		  AND NOT (t.id = ANY($1))
 		ORDER BY t.id = $2 DESC, t.booked_on DESC, t.id LIMIT 1`, skip, focus).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {

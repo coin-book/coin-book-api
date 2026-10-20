@@ -65,12 +65,21 @@ func (r *Repo) account(ctx context.Context, q db.Querier, id uuid.UUID) (*accoun
 	return a, eris.Wrap(err, "get account")
 }
 
-// ledgerBalances is each account's opening balance plus its transactions to the end of each day.
+// ledgerBalances is each account's opening balance plus its transactions to the end of each day,
+// summed between consecutive days and accumulated, so each transaction is read once.
 func (r *Repo) ledgerBalances(ctx context.Context, days []time.Time) (map[uuid.UUID]map[time.Time]int64, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT a.id, d.day, a.opening_balance_minor + coalesce((
-			SELECT sum(t.amount_minor) FROM transaction t WHERE t.account_id = a.id AND t.booked_on <= d.day), 0)::bigint
-		FROM account a CROSS JOIN unnest($1::date[]) AS d (day) WHERE NOT a.archived`, days)
+		WITH d AS (
+			SELECT day, coalesce(lag(day) OVER (ORDER BY day), '-infinity') AS after FROM unnest($1::date[]) AS u (day)
+		)
+		SELECT a.id, d.day,
+			(a.opening_balance_minor + sum(coalesce(m.amount, 0)) OVER (PARTITION BY a.id ORDER BY d.day))::bigint
+		FROM account a CROSS JOIN d
+		LEFT JOIN LATERAL (
+			SELECT sum(t.amount_minor) AS amount FROM transaction t
+			WHERE t.account_id = a.id AND t.booked_on > d.after AND t.booked_on <= d.day
+		) m ON true
+		WHERE NOT a.archived`, days)
 	if err != nil {
 		return nil, eris.Wrap(err, "sum balances on days")
 	}

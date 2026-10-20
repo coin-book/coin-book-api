@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rotisserie/eris"
 
+	"coin-book-api/internal/domain/transfer"
 	"coin-book-api/internal/platform/db"
 )
 
@@ -64,7 +65,7 @@ func (r *Repo) trainingExamples(ctx context.Context, q db.Querier) ([]Example, e
 		FROM transaction t JOIN category_assignment ca ON ca.transaction_id = t.id
 		WHERE ca.source IN ('manual', 'rule', 'bank')
 		  AND NOT EXISTS (SELECT 1 FROM category_assignment o WHERE o.transaction_id = t.id AND o.category_id <> ca.category_id)
-		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)`)
+		  AND `+transfer.NotALeg("t")+``)
 	if err != nil {
 		return nil, eris.Wrap(err, "list training examples")
 	}

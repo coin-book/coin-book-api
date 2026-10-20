@@ -60,29 +60,52 @@ func NewService(pool *db.Pool, categorizer Categorizer, loans LoanReconciler) *S
 	return &Service{pool: pool, categorizer: categorizer, loans: loans}
 }
 
-// candidateSQL lists, for each unpaired transaction in $1 (all when NULL), every
-// unpaired opposite movement in another own account: same currency and amount within
-// the window, or the other leg of a currency exchange on the same day.
-const candidateSQL = `
+// candidateSQL pairs each transaction free to pair ($1 when filtered) with opposite movements in
+// another own account: same amount within the window, or an exchange leg the same day. Each arm
+// joins on an indexed equality; an OR of the two compared every pair of rows.
+func candidateSQL(filtered bool) string {
+	filter := "$1::text[] IS NULL AND "
+	if filtered {
+		filter = "t.id = ANY($1) AND "
+	}
+	return `
+	WITH n AS (
+		SELECT t.id, t.account_id, t.amount_minor, t.currency, t.booked_on, t.operation_type, t.counterparty_account
+		FROM transaction t
+		WHERE ` + filter + `t.amount_minor <> 0 AND ` + freeToPair("t") + `
+	), pairs AS (
+		SELECT n.id AS n_id, c.id AS c_id FROM n JOIN transaction c
+			ON c.currency = n.currency AND c.amount_minor = -n.amount_minor
+			AND c.booked_on BETWEEN n.booked_on - $2::int AND n.booked_on + $2::int AND c.account_id <> n.account_id
+		UNION ALL
+		SELECT n.id, c.id FROM n JOIN transaction c
+			ON c.booked_on = n.booked_on AND c.operation_type = '` + exchangeOperation + `'
+			AND c.currency <> n.currency AND sign(c.amount_minor) = -sign(n.amount_minor) AND c.account_id <> n.account_id
+		WHERE n.operation_type = '` + exchangeOperation + `'
+	)
 	SELECT n.id, n.amount_minor, c.id,
 		coalesce(n.counterparty_account = ca.account_number, false)
 			OR coalesce(c.counterparty_account = na.account_number, false) AS strong,
 		(SELECT count(*) FROM transaction x
-			WHERE x.account_id <> c.account_id AND x.currency = c.currency AND x.amount_minor = -c.amount_minor
-			  AND abs(x.booked_on - c.booked_on) <= $2
-			  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = x.id OR tp.in_tx_id = x.id)) AS rivals
-	FROM transaction n
+			WHERE x.currency = c.currency AND x.amount_minor = -c.amount_minor AND x.account_id <> c.account_id
+			  AND x.booked_on BETWEEN c.booked_on - $2::int AND c.booked_on + $2::int
+			  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = x.id)
+			  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.in_tx_id = x.id)) AS rivals
+	FROM pairs p
+	JOIN n ON n.id = p.n_id
+	JOIN transaction c ON c.id = p.c_id
 	JOIN account na ON na.id = n.account_id
-	JOIN transaction c ON c.account_id <> n.account_id AND sign(c.amount_minor) = -sign(n.amount_minor) AND (
-		(c.currency = n.currency AND c.amount_minor = -n.amount_minor AND abs(c.booked_on - n.booked_on) <= $2)
-		OR (c.currency <> n.currency AND n.operation_type = '` + exchangeOperation + `'
-			AND c.operation_type = '` + exchangeOperation + `' AND c.booked_on = n.booked_on))
 	JOIN account ca ON ca.id = c.account_id
-	WHERE ($1::text[] IS NULL OR n.id = ANY($1)) AND n.amount_minor <> 0
-	  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = n.id OR tp.in_tx_id = n.id)
-	  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = c.id OR tp.in_tx_id = c.id)
-	  AND NOT EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id IN (n.id, c.id))
+	WHERE ` + freeToPair("c") + `
 	ORDER BY n.booked_on, n.id, c.booked_on, c.id`
+}
+
+// freeToPair: the transaction is in no pair and pays no loan instalment.
+func freeToPair(alias string) string {
+	return `NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = ` + alias + `.id)
+		AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.in_tx_id = ` + alias + `.id)
+		AND NOT EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id = ` + alias + `.id)`
+}
 
 type edge struct {
 	from   string
@@ -93,11 +116,7 @@ type edge struct {
 }
 
 func loadEdges(ctx context.Context, q db.Querier, ids []string) ([]edge, error) {
-	var filter any
-	if ids != nil {
-		filter = ids
-	}
-	rows, err := q.Query(ctx, candidateSQL, filter, MatchWindowDays)
+	rows, err := q.Query(ctx, candidateSQL(ids != nil), ids, MatchWindowDays)
 	if err != nil {
 		return nil, eris.Wrap(err, "find transfer candidates")
 	}

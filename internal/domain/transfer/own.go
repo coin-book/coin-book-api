@@ -133,7 +133,7 @@ func (s *Service) DetectOwn(ctx context.Context, q db.Querier, transactionIDs []
 		FROM transaction t JOIN account a ON a.id = t.account_id
 		WHERE ($1::text[] IS NULL OR t.id = ANY($1)) AND t.amount_minor <> 0
 		  AND (t.counterparty_account IS NOT NULL OR t.counterparty IS NOT NULL OR t.operation_type IS NOT NULL)
-		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
+		  AND `+NotALeg("t")+`
 		  AND NOT EXISTS (SELECT 1 FROM not_transfer nt WHERE nt.transaction_id = t.id)
 		  AND NOT EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id = t.id)`, filter)
 	if err != nil {
@@ -280,7 +280,7 @@ func (s *Service) OwnAccountCandidates(ctx context.Context) ([]OwnAccountCandida
 		FROM transaction t
 		WHERE t.counterparty_account IS NOT NULL
 		  AND (t.operation_type = ANY($1) OR t.bank_category = ANY($1))
-		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
+		  AND `+NotALeg("t")+`
 		ORDER BY t.booked_on`, ownTransferSignals)
 	if err != nil {
 		return nil, eris.Wrap(err, "list own account candidates")

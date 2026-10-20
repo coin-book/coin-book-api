@@ -307,10 +307,12 @@ func mergeCategory(ctx context.Context, tx pgx.Tx, from, into, intoMain *Categor
 
 func (r *Repo) CategoryUsage(ctx context.Context) (map[uuid.UUID]CategoryUsage, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT c.id,
-			(SELECT count(*) FROM category_assignment a WHERE a.category_id = c.id),
-			(SELECT count(*) FROM rule ru WHERE ru.category_id = c.id)
-		FROM any_category c`)
+		WITH assigned AS (SELECT category_id, count(*) AS n FROM category_assignment GROUP BY 1),
+			ruled AS (SELECT category_id, count(*) AS n FROM rule GROUP BY 1)
+		SELECT c.id, coalesce(a.n, 0), coalesce(r.n, 0)
+		FROM any_category c
+		LEFT JOIN assigned a ON a.category_id = c.id
+		LEFT JOIN ruled r ON r.category_id = c.id`)
 	if err != nil {
 		return nil, eris.Wrap(err, "count category use")
 	}

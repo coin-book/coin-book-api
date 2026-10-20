@@ -11,6 +11,7 @@ import (
 	"github.com/rotisserie/eris"
 
 	"coin-book-api/internal/domain/categorization"
+	"coin-book-api/internal/domain/transfer"
 	"coin-book-api/internal/platform/db"
 	"coin-book-api/internal/platform/money"
 )
@@ -32,19 +33,25 @@ type Repo struct {
 func NewRepo(pool *db.Pool) *Repo { return &Repo{pool: pool} }
 
 // Totals sums signed amounts per month and category over [from, to). An
-// uncategorised transaction counts as income or expense by its sign.
+// uncategorised transaction counts as income or expense by its sign. Lines are summed
+// before the categories view joins: joined per row, its union is rebuilt for each one.
 func (r *Repo) Totals(ctx context.Context, from, to time.Time, currency money.Currency) ([]Total, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT date_trunc('month', t.booked_on)::date, c.id, m.id,
-			coalesce(m.kind, CASE WHEN t.amount_minor > 0 THEN 'income' ELSE 'expense' END),
-			sum(coalesce(ca.amount_minor, t.amount_minor))::bigint
-		FROM transaction t
-		LEFT JOIN category_assignment ca ON ca.transaction_id = t.id
-		LEFT JOIN any_category c ON c.id = ca.category_id
+		WITH lines AS (
+			SELECT date_trunc('month', t.booked_on)::date AS month, ca.category_id,
+				CASE WHEN t.amount_minor > 0 THEN 'income' ELSE 'expense' END AS sign_kind,
+				sum(coalesce(ca.amount_minor, t.amount_minor)) AS amount
+			FROM transaction t
+			LEFT JOIN category_assignment ca ON ca.transaction_id = t.id
+			WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
+			  AND `+transfer.NotALeg("t")+`
+			GROUP BY 1, 2, 3
+		)
+		SELECT l.month, c.id, m.id, coalesce(m.kind, l.sign_kind), sum(l.amount)::bigint
+		FROM lines l
+		LEFT JOIN any_category c ON c.id = l.category_id
 		LEFT JOIN any_category m ON m.id = coalesce(c.parent_id, c.id)
-		WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
-		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
-		  AND coalesce(m.kind, '') <> 'transfer'
+		WHERE coalesce(m.kind, '') <> 'transfer'
 		GROUP BY 1, 2, 3, 4`, from, to, string(currency))
 	if err != nil {
 		return nil, eris.Wrap(err, "sum spending")
@@ -105,16 +112,21 @@ type AccountTotal struct {
 // same way Totals does, for drawing where money came in and went out.
 func (r *Repo) ByAccount(ctx context.Context, from, to time.Time, currency money.Currency) ([]AccountTotal, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT t.account_id, m.id,
-			coalesce(m.kind, CASE WHEN t.amount_minor > 0 THEN 'income' ELSE 'expense' END),
-			sum(coalesce(ca.amount_minor, t.amount_minor))::bigint
-		FROM transaction t
-		LEFT JOIN category_assignment ca ON ca.transaction_id = t.id
-		LEFT JOIN any_category c ON c.id = ca.category_id
+		WITH lines AS (
+			SELECT t.account_id, ca.category_id,
+				CASE WHEN t.amount_minor > 0 THEN 'income' ELSE 'expense' END AS sign_kind,
+				sum(coalesce(ca.amount_minor, t.amount_minor)) AS amount
+			FROM transaction t
+			LEFT JOIN category_assignment ca ON ca.transaction_id = t.id
+			WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
+			  AND `+transfer.NotALeg("t")+`
+			GROUP BY 1, 2, 3
+		)
+		SELECT l.account_id, m.id, coalesce(m.kind, l.sign_kind), sum(l.amount)::bigint
+		FROM lines l
+		LEFT JOIN any_category c ON c.id = l.category_id
 		LEFT JOIN any_category m ON m.id = coalesce(c.parent_id, c.id)
-		WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
-		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
-		  AND coalesce(m.kind, '') <> 'transfer'
+		WHERE coalesce(m.kind, '') <> 'transfer'
 		GROUP BY 1, 2, 3`, from, to, string(currency))
 	if err != nil {
 		return nil, eris.Wrap(err, "sum spending by account")
