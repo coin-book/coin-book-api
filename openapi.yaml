@@ -25,6 +25,9 @@ components:
             - mbank_sk
             - revolut
             - ibkr
+            - fingood
+            - investown
+            - portu
             - other
           type: string
         kind:
@@ -36,6 +39,13 @@ components:
             - broker
             - cash
             - card
+            - p2p
+            - pension
+            - property
+            - other_asset
+            - mortgage
+            - loan
+            - loan_reserve
           type: string
         last_booked_on:
           format: date
@@ -44,6 +54,9 @@ components:
           type: string
         opening_balance:
           $ref: "#/components/schemas/Amount"
+        parent_id:
+          description: "The account this one belongs to: a pocket's main account, a loan reserve's mortgage."
+          type: string
         transaction_count:
           format: int64
           type: integer
@@ -70,6 +83,107 @@ components:
       required:
         - account_id
         - amount_minor
+      type: object
+    AccountPerformance:
+      additionalProperties: false
+      properties:
+        annual_return:
+          description: Money-weighted annual return (XIRR) as a decimal fraction, 0.085 = 8.5 %; absent when it cannot be told.
+          type: string
+        contributed:
+          $ref: "#/components/schemas/Amount"
+        flows:
+          description: Transfers between this account and other own accounts, oldest first.
+          items:
+            $ref: "#/components/schemas/TransferFlow"
+          type: array
+        gain:
+          $ref: "#/components/schemas/Amount"
+          description: Value less the money put in net of what was taken out.
+        value:
+          $ref: "#/components/schemas/Amount"
+          description: The latest value; absent before the first.
+        valued_on:
+          format: date
+          type: string
+        withdrawn:
+          $ref: "#/components/schemas/Amount"
+      required:
+        - contributed
+        - withdrawn
+        - flows
+      type: object
+    AccountValuation:
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        note:
+          type: string
+        value:
+          $ref: "#/components/schemas/Amount"
+          description: "For a loan: the balance owed, positive."
+        valued_on:
+          format: date
+          type: string
+      required:
+        - id
+        - valued_on
+        - value
+        - note
+      type: object
+    AccountValue:
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        class:
+          enum:
+            - cash
+            - savings
+            - investments
+            - p2p
+            - pension
+            - property
+            - other
+            - mortgage
+            - loan
+          type: string
+        liquidity:
+          description: How soon the money could be spent; absent for a liability.
+          enum:
+            - immediate
+            - days
+            - locked
+          type: string
+        unvalued:
+          description: An asset never valued, or a loan without terms or a balance; it counts as zero.
+          type: boolean
+        valuation:
+          description: "ledger: balance from transactions; market: plus positions at market prices; snapshot: values entered by hand or imported; schedule: the loan's repayment schedule; flows: a loan reserve, transfers in less out from a statement balance."
+          enum:
+            - ledger
+            - market
+            - snapshot
+            - schedule
+            - flows
+          type: string
+        value:
+          $ref: "#/components/schemas/Amount"
+          description: In the account's currency, negative for a liability; a broker account's positions count only in value_czk.
+        value_czk:
+          $ref: "#/components/schemas/Amount"
+          description: Absent without an exchange rate.
+        valued_on:
+          description: The day of the value a snapshot account carries.
+          format: date
+          type: string
+      required:
+        - account_id
+        - class
+        - valuation
+        - value
+        - unvalued
       type: object
     AgentToken:
       additionalProperties: false
@@ -133,12 +247,18 @@ components:
           items:
             type: string
           type: array
+        number_matches:
+          description: "Candidates whose account number one leg names as its counterparty account: the likelier ones."
+          items:
+            type: string
+          type: array
         transaction_id:
           description: The outgoing leg.
           type: string
       required:
         - transaction_id
         - candidate_ids
+        - number_matches
       type: object
     Amount:
       additionalProperties: false
@@ -165,12 +285,13 @@ components:
         category_id:
           type: string
         source:
-          description: "model: the learned classifier chose it; confirm or change it."
+          description: "model: the learned classifier chose it; confirm or change it. loan: a loan instalment split by its schedule."
           enum:
             - rule
             - manual
             - bank
             - model
+            - loan
           type: string
       required:
         - category_id
@@ -679,6 +800,12 @@ components:
             - broker
             - cash
             - card
+            - p2p
+            - pension
+            - property
+            - other_asset
+            - mortgage
+            - loan
           type: string
         name:
           maxLength: 100
@@ -814,6 +941,17 @@ components:
         - currency
         - nodes
         - links
+      type: object
+    HistoryOutputBody:
+      additionalProperties: false
+      properties:
+        months:
+          description: Oldest first.
+          items:
+            $ref: "#/components/schemas/NetWorthMonth"
+          type: array
+      required:
+        - months
       type: object
     HoldingSummary:
       additionalProperties: false
@@ -1182,6 +1320,17 @@ components:
         - trades
         - sales
       type: object
+    KeyedAmount:
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        value:
+          $ref: "#/components/schemas/Amount"
+      required:
+        - key
+        - value
+      type: object
     ListAccountsOutputBody:
       additionalProperties: false
       properties:
@@ -1284,6 +1433,239 @@ components:
       required:
         - transfers
       type: object
+    LoanInstalment:
+      additionalProperties: false
+      properties:
+        balance:
+          $ref: "#/components/schemas/Amount"
+          description: Owed after this instalment.
+        due_on:
+          format: date
+          type: string
+        interest:
+          $ref: "#/components/schemas/Amount"
+        principal:
+          $ref: "#/components/schemas/Amount"
+        status:
+          description: "paid: bank payments booked nearest its due day paid it; assumed: due by today without payments, counted as paid by the schedule; projected: still to come."
+          enum:
+            - paid
+            - assumed
+            - projected
+          type: string
+      required:
+        - due_on
+        - interest
+        - principal
+        - balance
+        - status
+      type: object
+    LoanInterestYear:
+      additionalProperties: false
+      properties:
+        deductible:
+          $ref: "#/components/schemas/Amount"
+          description: "What may lower the tax base for one's own housing (mortgages only): 150 000 Kč a year, 300 000 Kč for housing financed before 2021."
+        interest:
+          $ref: "#/components/schemas/Amount"
+          description: Interest of the instalments due that year by today.
+        year:
+          format: int64
+          type: integer
+      required:
+        - year
+        - interest
+        - deductible
+      type: object
+    LoanOverview:
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        balance:
+          $ref: "#/components/schemas/Amount"
+          description: Owed today.
+        current:
+          $ref: "#/components/schemas/LoanTerms"
+          description: The terms in force today; absent before the first.
+        kind:
+          enum:
+            - mortgage
+            - loan
+          type: string
+        next:
+          $ref: "#/components/schemas/LoanInstalment"
+          description: The next instalment after today; absent once repaid.
+        paid_off_on:
+          description: The last instalment's due day.
+          format: date
+          type: string
+        payments:
+          description: Newest first.
+          items:
+            $ref: "#/components/schemas/LoanPaymentRow"
+          type: array
+        remaining_interest:
+          $ref: "#/components/schemas/Amount"
+          description: Interest of the projected instalments.
+        remaining_months:
+          format: int64
+          type: integer
+        reserve:
+          $ref: "#/components/schemas/LoanReserve"
+          description: A reserve held against the mortgage that bears no interest (Air Bank's Chytrá rezerva).
+        terms:
+          description: Oldest first.
+          items:
+            $ref: "#/components/schemas/LoanTerms"
+          type: array
+        years:
+          description: Newest first.
+          items:
+            $ref: "#/components/schemas/LoanInterestYear"
+          type: array
+      required:
+        - account_id
+        - kind
+        - balance
+        - remaining_months
+        - remaining_interest
+        - terms
+        - payments
+        - years
+      type: object
+    LoanPayment:
+      additionalProperties: false
+      properties:
+        account_id:
+          description: The mortgage or loan.
+          type: string
+        by_schedule:
+          description: "The split follows the schedule; false: the user split it."
+          type: boolean
+        interest_minor:
+          format: int64
+          type: integer
+        principal_minor:
+          format: int64
+          type: integer
+      required:
+        - account_id
+        - interest_minor
+        - principal_minor
+        - by_schedule
+      type: object
+    LoanPaymentRow:
+      additionalProperties: false
+      properties:
+        amount:
+          $ref: "#/components/schemas/Amount"
+          description: "Positive: paid."
+        booked_on:
+          format: date
+          type: string
+        by_schedule:
+          description: "The split follows the schedule; false: the user split it."
+          type: boolean
+        description:
+          type: string
+        interest:
+          $ref: "#/components/schemas/Amount"
+        principal:
+          $ref: "#/components/schemas/Amount"
+        transaction_id:
+          type: string
+      required:
+        - transaction_id
+        - booked_on
+        - description
+        - amount
+        - interest
+        - principal
+        - by_schedule
+      type: object
+    LoanRepayment:
+      additionalProperties: false
+      properties:
+        interest:
+          $ref: "#/components/schemas/Amount"
+        months:
+          format: int64
+          type: integer
+        paid_off_on:
+          format: date
+          type: string
+        payment:
+          $ref: "#/components/schemas/Amount"
+      required:
+        - payment
+        - months
+        - interest
+        - paid_off_on
+      type: object
+    LoanReserve:
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        balance:
+          $ref: "#/components/schemas/Amount"
+          description: Held today.
+        paid_off_on:
+          format: date
+          type: string
+        paid_off_without_on:
+          description: When the loan would be repaid without the reserve.
+          format: date
+          type: string
+        saved:
+          $ref: "#/components/schemas/Amount"
+          description: Interest saved on the instalments due by today.
+        saves:
+          $ref: "#/components/schemas/Amount"
+          description: Interest it will save on the projected instalments if it stays as it is.
+      required:
+        - account_id
+        - balance
+        - saved
+        - saves
+      type: object
+    LoanTerms:
+      additionalProperties: false
+      properties:
+        annual_rate:
+          description: Percent a year, decimal.
+          examples:
+            - "4.89"
+          type: string
+        balance:
+          $ref: "#/components/schemas/Amount"
+          description: Owed on valid_from.
+        fixed_until:
+          description: Absent for a rate that is not fixed.
+          format: date
+          type: string
+        maturity_on:
+          format: date
+          type: string
+        payment:
+          $ref: "#/components/schemas/Amount"
+          description: The monthly instalment.
+        payment_day:
+          description: Day of the month the instalment is due; the month's last day when shorter.
+          format: int64
+          type: integer
+        valid_from:
+          format: date
+          type: string
+      required:
+        - valid_from
+        - balance
+        - annual_rate
+        - payment
+        - payment_day
+        - maturity_on
+      type: object
     Lot:
       additionalProperties: false
       properties:
@@ -1332,6 +1714,24 @@ components:
           type: integer
       required:
         - applied_to_other
+      type: object
+    MarkPaymentInputBody:
+      additionalProperties: false
+      properties:
+        account_id:
+          description: The mortgage or loan the payment pays.
+          type: string
+        interest_minor:
+          description: "With principal_minor, the user's own split; both absent: split by the schedule."
+          format: int64
+          minimum: 0
+          type: integer
+        principal_minor:
+          format: int64
+          minimum: 0
+          type: integer
+      required:
+        - account_id
       type: object
     MarketProfile:
       additionalProperties: false
@@ -1486,14 +1886,46 @@ components:
     NetWorth:
       additionalProperties: false
       properties:
+        accounts:
+          items:
+            $ref: "#/components/schemas/AccountValue"
+          type: array
+        assets_czk:
+          $ref: "#/components/schemas/Amount"
+        by_class:
+          description: "key: class; liabilities are negative."
+          items:
+            $ref: "#/components/schemas/KeyedAmount"
+          type: array
+        by_liquidity:
+          description: "key: immediate, days or locked."
+          items:
+            $ref: "#/components/schemas/KeyedAmount"
+          type: array
         cash_czk:
           $ref: "#/components/schemas/Amount"
-          description: Balances of the accounts that are not archived, at the latest ČNB rates.
+          description: Balances of accounts valued by their transactions, including brokers' cash and loan reserves.
         investments_czk:
           $ref: "#/components/schemas/Amount"
           description: Market value of the open positions.
+        liabilities_czk:
+          $ref: "#/components/schemas/Amount"
+          description: "Positive: what is owed."
+        monthly_expenses_czk:
+          $ref: "#/components/schemas/Amount"
+          description: Average spending of the last twelve complete months, without transfers and repayments.
+        "on":
+          format: date
+          type: string
+        other_assets_czk:
+          $ref: "#/components/schemas/Amount"
+          description: "Assets valued at dates: P2P, pension, property and others."
+        reserve_months:
+          description: Immediately available money in months of that spending; decimal, absent without spending.
+          type: string
         total_czk:
           $ref: "#/components/schemas/Amount"
+          description: Assets less liabilities.
         unconverted:
           description: Currencies held without a ČNB rate yet; their balances are left out.
           items:
@@ -1504,11 +1936,58 @@ components:
           format: int64
           type: integer
       required:
+        - "on"
         - total_czk
+        - assets_czk
+        - liabilities_czk
         - cash_czk
         - investments_czk
+        - other_assets_czk
+        - by_class
+        - by_liquidity
+        - monthly_expenses_czk
+        - accounts
         - unconverted
         - unvalued_positions
+      type: object
+    NetWorthMonth:
+      additionalProperties: false
+      properties:
+        assets_czk:
+          $ref: "#/components/schemas/Amount"
+        by_class:
+          items:
+            $ref: "#/components/schemas/KeyedAmount"
+          type: array
+        change_czk:
+          $ref: "#/components/schemas/Amount"
+          description: Against the end of the month before.
+        liabilities_czk:
+          $ref: "#/components/schemas/Amount"
+        month:
+          description: The month whose end (today for the current month) the values are at.
+          type: string
+        "on":
+          format: date
+          type: string
+        other_change_czk:
+          $ref: "#/components/schemas/Amount"
+          description: "The rest of the change: returns, revaluation, repayments of loans valued by schedule."
+        saved_czk:
+          $ref: "#/components/schemas/Amount"
+          description: "Income less spending of the month: the part of the change the user saved."
+        total_czk:
+          $ref: "#/components/schemas/Amount"
+      required:
+        - month
+        - "on"
+        - total_czk
+        - assets_czk
+        - liabilities_czk
+        - change_czk
+        - saved_czk
+        - other_change_czk
+        - by_class
       type: object
     NewAccount:
       additionalProperties: false
@@ -1567,6 +2046,146 @@ components:
           type: array
       required:
         - candidates
+      type: object
+    P2PLoan:
+      additionalProperties: false
+      properties:
+        at_risk:
+          description: Late, overdue or not repaid as agreed.
+          type: boolean
+        delay_days:
+          format: int64
+          type: integer
+        fees:
+          $ref: "#/components/schemas/Amount"
+        final_payment_on:
+          format: date
+          type: string
+        interest_paid:
+          $ref: "#/components/schemas/Amount"
+        interest_rate:
+          description: Percent a year, decimal.
+          type: string
+        invested:
+          $ref: "#/components/schemas/Amount"
+        invested_on:
+          format: date
+          type: string
+        loan_number:
+          type: string
+        market_gain:
+          $ref: "#/components/schemas/Amount"
+        name:
+          type: string
+        next_payment:
+          $ref: "#/components/schemas/Amount"
+        next_payment_on:
+          format: date
+          type: string
+        outstanding:
+          $ref: "#/components/schemas/Amount"
+        overdue:
+          $ref: "#/components/schemas/Amount"
+        penalty_interest:
+          $ref: "#/components/schemas/Amount"
+        principal_returned:
+          $ref: "#/components/schemas/Amount"
+        repayment:
+          description: As the platform names it, e.g. Balonově or Anuitně.
+          type: string
+        repayment_status:
+          type: string
+        status:
+          type: string
+      required:
+        - loan_number
+        - name
+        - repayment
+        - status
+        - repayment_status
+        - invested
+        - outstanding
+        - interest_rate
+        - delay_days
+        - overdue
+        - interest_paid
+        - penalty_interest
+        - principal_returned
+        - market_gain
+        - fees
+        - at_risk
+      type: object
+    P2PMaturity:
+      additionalProperties: false
+      properties:
+        month:
+          description: Absent for loans without a final payment date.
+          type: string
+        outstanding:
+          $ref: "#/components/schemas/Amount"
+      required:
+        - outstanding
+      type: object
+    P2PSnapshot:
+      additionalProperties: false
+      properties:
+        at_risk:
+          $ref: "#/components/schemas/Amount"
+        average_rate:
+          description: Percent a year weighted by the outstanding principal.
+          type: string
+        earned:
+          $ref: "#/components/schemas/Amount"
+          description: Interest, penalties and market gains less fees, since investing.
+        earned_since_previous:
+          $ref: "#/components/schemas/Amount"
+          description: Absent for the first export.
+        history:
+          description: Every imported export, oldest first.
+          items:
+            $ref: "#/components/schemas/P2PSnapshotTotal"
+          type: array
+        loans:
+          items:
+            $ref: "#/components/schemas/P2PLoan"
+          type: array
+        maturities:
+          description: Outstanding principal by the month of the final payment, oldest first.
+          items:
+            $ref: "#/components/schemas/P2PMaturity"
+          type: array
+        "on":
+          format: date
+          type: string
+        outstanding:
+          $ref: "#/components/schemas/Amount"
+        previous_on:
+          format: date
+          type: string
+      required:
+        - "on"
+        - outstanding
+        - at_risk
+        - earned
+        - average_rate
+        - maturities
+        - history
+        - loans
+      type: object
+    P2PSnapshotTotal:
+      additionalProperties: false
+      properties:
+        earned:
+          $ref: "#/components/schemas/Amount"
+        "on":
+          format: date
+          type: string
+        outstanding:
+          $ref: "#/components/schemas/Amount"
+      required:
+        - "on"
+        - outstanding
+        - earned
       type: object
     PairTransferInputBody:
       additionalProperties: false
@@ -1690,6 +2309,26 @@ components:
         - confidence
         - reasons
       type: object
+    PrepaymentOutputBody:
+      additionalProperties: false
+      properties:
+        current:
+          $ref: "#/components/schemas/LoanRepayment"
+          description: Without the extra payment.
+        extra:
+          $ref: "#/components/schemas/Amount"
+        keep_maturity:
+          $ref: "#/components/schemas/LoanRepayment"
+          description: The maturity stays, the instalment gets lower.
+        keep_payment:
+          $ref: "#/components/schemas/LoanRepayment"
+          description: The instalment stays, the loan ends sooner.
+      required:
+        - extra
+        - current
+        - keep_payment
+        - keep_maturity
+      type: object
     PriceStatus:
       additionalProperties: false
       properties:
@@ -1742,16 +2381,22 @@ components:
             - invalid_symbol
             - layout_invalid
             - layout_mismatch
+            - loan_split_mismatch
             - mapping_required
             - merge_into_itself
             - method_not_allowed
+            - no_loan_terms
+            - not_a_loan
+            - not_a_loan_payment
             - not_found
             - not_own_account
             - not_pairable
             - not_paired
+            - not_valued_by_hand
             - nothing_to_match
             - password_too_short
             - rate_limited
+            - reserve_exists
             - session_required
             - split_mismatch
             - system_category
@@ -1760,6 +2405,7 @@ components:
             - unknown_scope
             - unsupported_format
             - validation_failed
+            - valuation_mismatch
           title: ErrorCode
           type: string
         detail:
@@ -1827,6 +2473,15 @@ components:
       required:
         - lines
       type: object
+    ReserveOutputBody:
+      additionalProperties: false
+      properties:
+        account_id:
+          description: The reserve's account.
+          type: string
+      required:
+        - account_id
+      type: object
     RollbackOutputBody:
       additionalProperties: false
       properties:
@@ -1876,6 +2531,71 @@ components:
           type: array
       required:
         - rules
+      type: object
+    SaveTermsInputBody:
+      additionalProperties: false
+      properties:
+        annual_rate:
+          description: Percent a year.
+          examples:
+            - "4.89"
+          pattern: ^[0-9]{1,2}(\.[0-9]{1,4})?$
+          type: string
+        balance_minor:
+          description: Owed on valid_from.
+          format: int64
+          minimum: 1
+          type: integer
+        fixed_until:
+          format: date
+          type: string
+        maturity_on:
+          format: date
+          type: string
+        payment_day:
+          format: int64
+          maximum: 31
+          minimum: 1
+          type: integer
+        payment_minor:
+          format: int64
+          minimum: 1
+          type: integer
+      required:
+        - balance_minor
+        - annual_rate
+        - payment_minor
+        - payment_day
+        - maturity_on
+      type: object
+    SaveValuationInputBody:
+      additionalProperties: false
+      properties:
+        note:
+          maxLength: 200
+          type: string
+        value_minor:
+          description: In the account's currency; for a loan the balance owed.
+          format: int64
+          minimum: 0
+          type: integer
+        valued_on:
+          format: date
+          type: string
+      required:
+        - valued_on
+        - value_minor
+      type: object
+    ScheduleOutputBody:
+      additionalProperties: false
+      properties:
+        instalments:
+          description: From the first terms to the last instalment, oldest first.
+          items:
+            $ref: "#/components/schemas/LoanInstalment"
+          type: array
+      required:
+        - instalments
       type: object
     SessionBody:
       additionalProperties: false
@@ -2087,6 +2807,9 @@ components:
           type: string
         import_batch_id:
           type: string
+        loan_payment:
+          $ref: "#/components/schemas/LoanPayment"
+          description: Set when the transaction pays an instalment of an own mortgage or loan.
         message:
           type: string
         operation_type:
@@ -2127,16 +2850,30 @@ components:
           description: Absent while the other account's statement is not imported.
           type: string
         matched_by:
-          description: "number and counterparty: recognised as a transfer to an own account."
+          description: "number, counterparty and operation (the bank's operation type): recognised as a transfer to an own account."
           enum:
             - auto
             - manual
             - number
             - counterparty
+            - operation
           type: string
       required:
         - counterpart_account_id
         - matched_by
+      type: object
+    TransferFlow:
+      additionalProperties: false
+      properties:
+        amount:
+          $ref: "#/components/schemas/Amount"
+          description: "Positive: put in; negative: taken out."
+        "on":
+          format: date
+          type: string
+      required:
+        - "on"
+        - amount
       type: object
     TransferPair:
       additionalProperties: false
@@ -2216,6 +2953,12 @@ components:
             - broker
             - cash
             - card
+            - p2p
+            - pension
+            - property
+            - other_asset
+            - mortgage
+            - loan
           type: string
         name:
           maxLength: 100
@@ -2276,6 +3019,17 @@ components:
       required:
         - transactions
         - rules
+      type: object
+    ValuationsOutputBody:
+      additionalProperties: false
+      properties:
+        valuations:
+          description: Newest first.
+          items:
+            $ref: "#/components/schemas/AccountValuation"
+          type: array
+      required:
+        - valuations
       type: object
     VersionOutputBody:
       additionalProperties: false
@@ -2345,7 +3099,7 @@ components:
       type: http
 info:
   description: |-
-    Personal finance: accounts, imported transactions, categories, transfers, budgets and reports.
+    Personal finance: accounts, imported transactions, categories, transfers, budgets, reports, investments, loans and net worth.
 
     Amounts are integers in the currency's smallest unit (`minor`) with an ISO 4217 `currency`; currencies are never summed together. Dates are calendar days in Europe/Prague.
 
@@ -2632,6 +3386,271 @@ paths:
       summary: Move every transaction into another account of the same currency and delete this one
       tags:
         - Accounts
+  /api/v1/accounts/{id}/p2p-loans:
+    get:
+      description: Agent tokens need the `accounts:read` scope.
+      operationId: get-p2p-loans
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/P2PSnapshot"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: A P2P platform's loans from its latest imported export
+      tags:
+        - Net worth
+  /api/v1/accounts/{id}/performance:
+    get:
+      description: Agent tokens need the `accounts:read` scope.
+      operationId: get-account-performance
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountPerformance"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: What an asset valued at dates earned on the money transferred into it
+      tags:
+        - Net worth
+  /api/v1/accounts/{id}/valuations:
+    get:
+      description: Agent tokens need the `accounts:read` scope.
+      operationId: list-account-valuations
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValuationsOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Values entered by hand for an asset, or balances owed on a loan
+      tags:
+        - Net worth
+    post:
+      description: A second value for the same day replaces the first. A loan's balance corrects its schedule from that day on.
+      operationId: save-account-valuation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveValuationInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountValuation"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Record an asset's value or a loan's balance at the end of a day
+      tags:
+        - Net worth
+  /api/v1/accounts/{id}/valuations/{valuation_id}:
+    delete:
+      operationId: delete-account-valuation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: valuation_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Remove a value entered by hand
+      tags:
+        - Net worth
   /api/v1/agent-tokens:
     get:
       operationId: list-agent-tokens
@@ -4201,6 +5220,312 @@ paths:
       summary: Sold lots and dividends per year, split into exempt and taxable gains
       tags:
         - Investments
+  /api/v1/loans/{account_id}:
+    get:
+      description: Agent tokens need the `accounts:read` scope.
+      operationId: get-loan
+      parameters:
+        - in: path
+          name: account_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanOverview"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: "A mortgage or loan today: balance, terms, next instalment, payments and interest per year"
+      tags:
+        - Loans
+  /api/v1/loans/{account_id}/prepayment:
+    get:
+      description: Agent tokens need the `accounts:read` scope.
+      operationId: simulate-loan-prepayment
+      parameters:
+        - in: path
+          name: account_id
+          required: true
+          schema:
+            type: string
+        - description: The extra payment made today.
+          explode: false
+          in: query
+          name: extra_minor
+          required: true
+          schema:
+            description: The extra payment made today.
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrepaymentOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: What an extra payment today would save, keeping the instalment or the maturity
+      tags:
+        - Loans
+  /api/v1/loans/{account_id}/reserve:
+    post:
+      description: Creates the reserve's account at the mortgage's bank. Transfers into and out of it are recognised by the bank's account number or operation type, and interest is charged on the balance less the reserve.
+      operationId: enable-loan-reserve
+      parameters:
+        - in: path
+          name: account_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReserveOutputBody"
+          description: Created
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Give a mortgage a reserve that lowers its interest, such as Air Bank's Chytrá rezerva
+      tags:
+        - Loans
+  /api/v1/loans/{account_id}/schedule:
+    get:
+      description: Agent tokens need the `accounts:read` scope.
+      operationId: get-loan-schedule
+      parameters:
+        - in: path
+          name: account_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Every instalment from the first terms to the last
+      tags:
+        - Loans
+  /api/v1/loans/{account_id}/terms/{valid_from}:
+    delete:
+      operationId: delete-loan-terms
+      parameters:
+        - in: path
+          name: account_id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: valid_from
+          required: true
+          schema:
+            format: date
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Remove the terms from a day
+      tags:
+        - Loans
+    put:
+      description: A refixation is new terms from its day. Payments to the loan are split by the schedule again.
+      operationId: save-loan-terms
+      parameters:
+        - in: path
+          name: account_id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: valid_from
+          required: true
+          schema:
+            format: date
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveTermsInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: "Set the terms in force from a day: the balance owed then, the rate and the instalment"
+      tags:
+        - Loans
   /api/v1/me:
     get:
       operationId: get-me
@@ -4449,9 +5774,59 @@ paths:
           description: Internal Server Error
       security:
         - bearerAuth: []
-      summary: "What the user owns today: account balances and investments, in CZK"
+      summary: What the user owns and owes today, per account and class, in CZK
       tags:
-        - Reports
+        - Net worth
+  /api/v1/reports/net-worth/history:
+    get:
+      description: Agent tokens need the `reports:read` scope.
+      operationId: get-net-worth-history
+      parameters:
+        - explode: false
+          in: query
+          name: months
+          schema:
+            default: 24
+            format: int64
+            maximum: 120
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Net worth at each month's end, with what was saved and what the rest of the change was
+      tags:
+        - Net worth
   /api/v1/rules:
     get:
       description: Agent tokens need the `categories:read` scope.
@@ -4945,6 +6320,103 @@ paths:
       summary: Accept the category the classifier chose
       tags:
         - Transactions
+  /api/v1/transactions/{tx_id}/loan-payment:
+    delete:
+      description: Its categories are cleared and it will not be recognised as a payment to the loan again.
+      operationId: unmark-loan-payment
+      parameters:
+        - in: path
+          name: tx_id
+          required: true
+          schema:
+            maxLength: 64
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: The transaction does not pay a loan
+      tags:
+        - Loans
+    put:
+      description: The interest becomes an expense, the principal a repayment; a transfer mark on the transaction is replaced.
+      operationId: mark-loan-payment
+      parameters:
+        - in: path
+          name: tx_id
+          required: true
+          schema:
+            maxLength: 64
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkPaymentInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Record a transaction as an instalment of a mortgage or loan
+      tags:
+        - Loans
   /api/v1/transfers:
     get:
       description: Agent tokens need the `transactions:read` scope.

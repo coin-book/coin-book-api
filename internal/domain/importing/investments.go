@@ -134,6 +134,9 @@ func (s *instrumentSeen) see(sec statement.Security, currency money.Currency) {
 	if s.security.Name == "" {
 		s.security.Name = sec.Name
 	}
+	if s.security.YahooSymbol == "" {
+		s.security.YahooSymbol = sec.YahooSymbol
+	}
 	if s.currency == "" {
 		s.currency = currency
 	}
@@ -167,21 +170,25 @@ func instrumentsOf(planned []*plannedInvestments) []*instrumentSeen {
 
 // upsertInstruments records instruments in the shared register. What one statement
 // leaves out (a dividend names no ticker) another fills in; nothing is ever replaced,
-// so one user's import cannot rewrite what another holder sees.
+// so one user's import cannot rewrite what another holder sees. The Yahoo symbol is set by the
+// first import only (ADR 209): a later one could otherwise pick any series for a missing one.
 func upsertInstruments(ctx context.Context, tx pgx.Tx, planned []*plannedInvestments) error {
 	instruments := instrumentsOf(planned)
 	// One order for every import, so two users' imports cannot lock shared rows crosswise.
 	slices.SortFunc(instruments, func(a, b *instrumentSeen) int { return strings.Compare(a.security.ISIN, b.security.ISIN) })
 	batch := &pgx.Batch{}
 	for _, inst := range instruments {
+		yahoo := investment.YahooSymbol(inst.security.Ticker, inst.currency)
+		if inst.security.YahooSymbol != "" {
+			yahoo = &inst.security.YahooSymbol
+		}
 		batch.Queue(`
 			INSERT INTO instrument (isin, ticker, name, yahoo_symbol) VALUES ($1, nullif($2, ''), $3, $4)
 			ON CONFLICT (isin) DO UPDATE SET
 				ticker = coalesce(instrument.ticker, excluded.ticker),
 				name = CASE WHEN instrument.name = '' THEN excluded.name ELSE instrument.name END,
-				yahoo_symbol = coalesce(instrument.yahoo_symbol, excluded.yahoo_symbol)`,
-			inst.security.ISIN, inst.security.Ticker, inst.security.Name,
-			investment.YahooSymbol(inst.security.Ticker, inst.currency))
+				yahoo_symbol = instrument.yahoo_symbol`,
+			inst.security.ISIN, inst.security.Ticker, inst.security.Name, yahoo)
 	}
 	return eris.Wrap(tx.SendBatch(ctx, batch).Close(), "record instruments")
 }

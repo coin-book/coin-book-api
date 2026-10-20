@@ -15,6 +15,8 @@ import (
 	"coin-book-api/internal/domain/identity"
 	"coin-book-api/internal/domain/importing"
 	"coin-book-api/internal/domain/investment"
+	"coin-book-api/internal/domain/loan"
+	"coin-book-api/internal/domain/networth"
 	"coin-book-api/internal/domain/report"
 	"coin-book-api/internal/domain/settings"
 	"coin-book-api/internal/domain/spending"
@@ -33,6 +35,8 @@ import (
 	"coin-book-api/internal/transport/http/categories"
 	"coin-book-api/internal/transport/http/imports"
 	"coin-book-api/internal/transport/http/investments"
+	"coin-book-api/internal/transport/http/loans"
+	networthhttp "coin-book-api/internal/transport/http/networth"
 	"coin-book-api/internal/transport/http/reports"
 	settingshttp "coin-book-api/internal/transport/http/settings"
 	"coin-book-api/internal/transport/http/transactions"
@@ -64,9 +68,10 @@ func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) *App {
 
 	settingsRepo := settings.NewRepo(pool)
 	categorizer := categorization.NewService(pool, categoryRepo, settingsRepo)
-	transferService := transfer.NewService(pool, categorizer)
+	loanService := loan.NewService(pool, loan.NewRepo(pool), c)
+	transferService := transfer.NewService(pool, categorizer, loanService)
 	prices := newPriceRefresher(cfg.Market, pool, c)
-	importer := importing.NewService(pool, accountRepo, categorizer, transferService, prices, cfg.Storage.ImportsDir)
+	importer := importing.NewService(pool, accountRepo, categorizer, transferService, loanService, prices, cfg.Storage.ImportsDir)
 	google := googleauth.New(cfg.Google, cfg.Server.PublicURL+auth.GoogleCallbackPath)
 
 	investmentService := investment.NewService(investment.NewRepo(pool), c)
@@ -80,10 +85,12 @@ func New(cfg *config.Config, pool *db.Pool, c clock.Clock, build Build) *App {
 		Categories:   categories.NewHandler(categoryRepo),
 		Transfers:    transfers.NewHandler(transferService),
 		Budgets:      budgets.NewHandler(budget.NewService(pool, spendingRepo, categoryRepo, c)),
-		Reports:      reports.NewHandler(report.NewService(spendingRepo), accountRepo, investmentService),
+		Reports:      reports.NewHandler(report.NewService(spendingRepo)),
 		AgentTokens:  agenttokens.NewHandler(tokens),
 		Settings:     settingshttp.NewHandler(settingsRepo, categorizer),
 		Investments:  investments.NewHandler(investmentService, prices, c),
+		NetWorth:     networthhttp.NewHandler(networth.NewService(networth.NewRepo(pool), investmentService, loanService, spendingRepo, c)),
+		Loans:        loans.NewHandler(loanService, transferService, pool),
 	})
 	return &App{Handler: handler, API: api, Prices: prices}
 }

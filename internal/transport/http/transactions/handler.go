@@ -35,13 +35,20 @@ func NewHandler(repo *transaction.Repo, categorizer *categorization.Service) *Ha
 type Assignment struct {
 	CategoryID  uuid.UUID `json:"category_id"`
 	AmountMinor int64     `json:"amount_minor"`
-	Source      string    `json:"source" enum:"rule,manual,bank,model" doc:"model: the learned classifier chose it; confirm or change it."`
+	Source      string    `json:"source" enum:"rule,manual,bank,model,loan" doc:"model: the learned classifier chose it; confirm or change it. loan: a loan instalment split by its schedule."`
 }
 
 type Transfer struct {
 	CounterpartTxID      *string   `json:"counterpart_tx_id,omitempty" doc:"Absent while the other account's statement is not imported."`
 	CounterpartAccountID uuid.UUID `json:"counterpart_account_id"`
-	MatchedBy            string    `json:"matched_by" enum:"auto,manual,number,counterparty" doc:"number and counterparty: recognised as a transfer to an own account."`
+	MatchedBy            string    `json:"matched_by" enum:"auto,manual,number,counterparty,operation" doc:"number, counterparty and operation (the bank's operation type): recognised as a transfer to an own account."`
+}
+
+type LoanPayment struct {
+	AccountID      uuid.UUID `json:"account_id" doc:"The mortgage or loan."`
+	InterestMinor  int64     `json:"interest_minor"`
+	PrincipalMinor int64     `json:"principal_minor"`
+	BySchedule     bool      `json:"by_schedule" doc:"The split follows the schedule; false: the user split it."`
 }
 
 type Transaction struct {
@@ -64,6 +71,7 @@ type Transaction struct {
 	SourceLine          int          `json:"source_line" doc:"Line in the imported file (F-IMP-6)."`
 	Categories          []Assignment `json:"categories"`
 	Transfer            *Transfer    `json:"transfer,omitempty" doc:"Set when this is one leg of a transfer between own accounts."`
+	LoanPayment         *LoanPayment `json:"loan_payment,omitempty" doc:"Set when the transaction pays an instalment of an own mortgage or loan."`
 	Suggestions         []Prediction `json:"suggestions,omitempty" doc:"Learned category suggestions; only on uncategorised transactions in lists."`
 }
 
@@ -373,6 +381,10 @@ func ToDTO(t transaction.Listed) Transaction {
 	if t.Transfer != nil {
 		out.Transfer = &Transfer{CounterpartTxID: t.Transfer.CounterpartTxID,
 			CounterpartAccountID: t.Transfer.CounterpartAccountID, MatchedBy: t.Transfer.MatchedBy}
+	}
+	if p := t.LoanPayment; p != nil {
+		out.LoanPayment = &LoanPayment{AccountID: p.AccountID, InterestMinor: p.InterestMinor, PrincipalMinor: p.PrincipalMinor,
+			BySchedule: p.BySchedule}
 	}
 	return out
 }

@@ -3,7 +3,11 @@ package statement
 
 import (
 	"io"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shopspring/decimal"
 
@@ -70,11 +74,13 @@ type Account struct {
 	OpeningBalanceMinor *int64 `json:",omitempty"`
 	// Investments is set for a broker account (ADR 209).
 	Investments *Investments `json:",omitempty"`
+	// P2P is set for a P2P platform's export of its loans (ADR 211).
+	P2P *P2PSnapshot `json:",omitempty"`
 }
 
 // HasRecords tells whether the account carries anything to import.
 func (a *Account) HasRecords() bool {
-	return len(a.Rows) > 0 || (a.Investments != nil && a.Investments.Len() > 0)
+	return len(a.Rows) > 0 || (a.Investments != nil && a.Investments.Len() > 0) || (a.P2P != nil && len(a.P2P.Positions) > 0)
 }
 
 type Totals struct {
@@ -112,11 +118,13 @@ type Investments struct {
 
 func (i *Investments) Len() int { return len(i.Buys) + len(i.Dividends) + len(i.LotSales) }
 
-// Security is an instrument as a statement names it; Ticker and Name may be empty.
+// Security is an instrument as a statement names it; Ticker, Name and YahooSymbol may be empty.
 type Security struct {
 	ISIN   string
 	Ticker string
 	Name   string
+	// YahooSymbol is the statement's own listing (CSPX.L), better than a guess from the currency.
+	YahooSymbol string `json:",omitempty"`
 }
 
 // Fees and taxes are in CZK: a statement may charge them in another currency than the trade's.
@@ -166,4 +174,88 @@ type LotSale struct {
 	FeeCZKMinor      int64
 	TaxCZKMinor      int64
 	IdentityKey      string
+}
+
+// P2PSnapshot is a platform's loans as its export showed them on one day.
+type P2PSnapshot struct {
+	TakenOn   time.Time
+	Positions []P2PPosition
+}
+
+// P2PPosition is one loan; the returned, paid and fee amounts are cumulative since investing.
+type P2PPosition struct {
+	Line                   int
+	LoanNumber             string
+	Name                   string
+	Repayment              string
+	Status                 string
+	RepaymentStatus        string
+	InvestedMinor          int64
+	OutstandingMinor       int64
+	InterestRate           decimal.Decimal
+	InvestedOn             *time.Time
+	NextPaymentOn          *time.Time
+	NextPaymentMinor       *int64
+	FinalPaymentOn         *time.Time
+	DelayDays              int
+	OverdueMinor           int64
+	InterestPaidMinor      int64
+	PenaltyInterestMinor   int64
+	PrincipalReturnedMinor int64
+	MarketGainMinor        int64
+	FeesMinor              int64
+}
+
+var (
+	isinPattern   = regexp.MustCompile(`^[A-Z]{2}[A-Z0-9]{9}[0-9]$`)
+	tickerPattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9.\-]{0,11}$`)
+	// A listed instrument: indices (^GSPC) and currency or futures pairs (=X, =F) are not one.
+	yahooPattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9.\-]{0,19}$`)
+)
+
+const maxNameLength = 120
+
+// ValidISIN checks the shape and the ISO 6166 check digit: letters become 10–35, then Luhn.
+func ValidISIN(isin string) bool {
+	if !isinPattern.MatchString(isin) {
+		return false
+	}
+	var digits strings.Builder
+	for _, c := range isin {
+		if c >= 'A' && c <= 'Z' {
+			digits.WriteString(strconv.Itoa(int(c-'A') + 10))
+		} else {
+			digits.WriteRune(c)
+		}
+	}
+	s := digits.String()
+	sum := 0
+	for i := len(s) - 1; i >= 0; i-- {
+		d := int(s[i] - '0')
+		if (len(s)-1-i)%2 == 1 {
+			d *= 2
+			if d > 9 {
+				d -= 9
+			}
+		}
+		sum += d
+	}
+	return sum%10 == 0
+}
+
+// NewSecurity keeps what a statement says about an instrument only when it looks like a ticker,
+// a name and a Yahoo symbol: instruments are shared, and their text is shown to other holders.
+func NewSecurity(isin, ticker, name, yahooSymbol string) Security {
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	if !tickerPattern.MatchString(ticker) {
+		ticker = ""
+	}
+	name = strings.TrimSpace(name)
+	if utf8.RuneCountInString(name) > maxNameLength {
+		name = string([]rune(name)[:maxNameLength])
+	}
+	if !yahooPattern.MatchString(yahooSymbol) {
+		yahooSymbol = ""
+	}
+	return Security{ISIN: isin, Ticker: ticker, Name: name, YahooSymbol: yahooSymbol}
 }

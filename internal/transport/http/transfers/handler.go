@@ -39,6 +39,7 @@ type listTransfersOutput struct {
 type AmbiguousTransfer struct {
 	TransactionID string   `json:"transaction_id" doc:"The outgoing leg."`
 	CandidateIDs  []string `json:"candidate_ids" doc:"Incoming movements that could be its other leg."`
+	NumberMatches []string `json:"number_matches" doc:"Candidates whose account number one leg names as its counterparty account: the likelier ones."`
 }
 
 type listAmbiguousOutput struct {
@@ -167,7 +168,8 @@ func (h *Handler) ambiguous(ctx context.Context, _ *struct{}) (*listAmbiguousOut
 	out := &listAmbiguousOutput{}
 	out.Body.AmbiguousTransfer = make([]AmbiguousTransfer, len(candidates))
 	for i, c := range candidates {
-		out.Body.AmbiguousTransfer[i] = AmbiguousTransfer{TransactionID: c.TransactionID, CandidateIDs: c.CandidateIDs}
+		out.Body.AmbiguousTransfer[i] = AmbiguousTransfer{TransactionID: c.TransactionID, CandidateIDs: c.CandidateIDs,
+			NumberMatches: append([]string{}, c.NumberMatches...)}
 	}
 	return out, nil
 }

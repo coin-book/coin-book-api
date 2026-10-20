@@ -23,8 +23,10 @@ import (
 	"coin-book-api/internal/domain/categorization"
 	"coin-book-api/internal/domain/importing/parser/abo"
 	"coin-book-api/internal/domain/importing/parser/airbank"
+	"coin-book-api/internal/domain/importing/parser/fingood"
 	"coin-book-api/internal/domain/importing/parser/generic"
 	"coin-book-api/internal/domain/importing/parser/mbankcz"
+	"coin-book-api/internal/domain/importing/parser/portu"
 	"coin-book-api/internal/domain/importing/parser/revolut"
 	"coin-book-api/internal/domain/importing/statement"
 	"coin-book-api/internal/platform/db"
@@ -44,7 +46,7 @@ var (
 )
 
 // parsers is the explicit registry; adding a bank means adding it here.
-var parsers = []statement.Parser{mbankcz.Parser{}, revolut.Parser{}, abo.Parser{}, airbank.Parser{}, generic.Parser{}}
+var parsers = []statement.Parser{mbankcz.Parser{}, revolut.Parser{}, abo.Parser{}, airbank.Parser{}, fingood.Parser{}, portu.Parser{}, generic.Parser{}}
 
 type Categorizer interface {
 	CategorizeNew(ctx context.Context, q db.Querier, candidates []categorization.Candidate) (categorization.AutoStats, error)
@@ -53,6 +55,11 @@ type Categorizer interface {
 type TransferMatcher interface {
 	AutoMatch(ctx context.Context, q db.Querier, transactionIDs []string) (int, error)
 	DetectOwn(ctx context.Context, q db.Querier, transactionIDs []string) (int, error)
+}
+
+// LoanReconciler splits the remaining loan payments again once an import that held some is rolled back.
+type LoanReconciler interface {
+	Reconcile(ctx context.Context, q db.Querier) error
 }
 
 // PriceRefresher fetches prices for instruments an import brought in, in the background.
@@ -65,15 +72,16 @@ type Service struct {
 	accounts    *account.Repo
 	categorizer Categorizer
 	transfers   TransferMatcher
+	loans       LoanReconciler
 	prices      PriceRefresher
 	importsDir  string
 }
 
 // NewService takes a nil prices when nothing should fetch prices after an import.
 func NewService(pool *db.Pool, accounts *account.Repo, categorizer Categorizer, transfers TransferMatcher,
-	prices PriceRefresher, importsDir string) *Service {
-	return &Service{pool: pool, accounts: accounts, categorizer: categorizer, transfers: transfers, prices: prices,
-		importsDir: importsDir}
+	loans LoanReconciler, prices PriceRefresher, importsDir string) *Service {
+	return &Service{pool: pool, accounts: accounts, categorizer: categorizer, transfers: transfers, loans: loans,
+		prices: prices, importsDir: importsDir}
 }
 
 type RowStatus string
@@ -153,6 +161,7 @@ type plan struct {
 	accounts    []*resolved
 	rows        []plannedRow
 	investments []*plannedInvestments
+	p2p         []*plannedP2P
 	content     []byte
 }
 
@@ -341,6 +350,10 @@ func (s *Service) plan(ctx context.Context, q db.Querier, u Upload) (*plan, erro
 			ar.Rows += acc.Investments.Len()
 			p.investments = append(p.investments, planInvestments(acc.Investments, index, owner, r.idIdentity))
 		}
+		if acc.P2P != nil {
+			ar.Rows += len(acc.P2P.Positions)
+			p.p2p = append(p.p2p, &plannedP2P{account: index, snapshot: acc.P2P})
+		}
 		if r.existing != nil {
 			ar.AccountID = &r.existing.ID
 		}
@@ -394,17 +407,40 @@ func (s *Service) plan(ctx context.Context, q db.Querier, u Upload) (*plan, erro
 	}
 	for _, planned := range p.investments {
 		for _, r := range planned.all() {
-			p.result.RowsTotal++
-			if r.known {
-				p.result.Accounts[r.account].Duplicates++
-				p.result.RowsDuplicate++
-			} else {
-				p.result.Accounts[r.account].New++
-				p.result.RowsNew++
+			p.countRecord(r.account, r.known)
+		}
+	}
+	if err := markKnownPositions(ctx, q, p); err != nil {
+		return nil, err
+	}
+	for _, planned := range p.p2p {
+		acc := p.accounts[planned.account]
+		for i, pos := range planned.snapshot.Positions {
+			p.countRecord(planned.account, planned.known[i])
+			if len(p.result.Rows) < previewRowLimit {
+				status := RowNew
+				if planned.known[i] {
+					status = RowDuplicate
+				}
+				p.result.Rows = append(p.result.Rows, PreviewRow{AccountRef: acc.key, Line: pos.Line,
+					BookedOn: planned.snapshot.TakenOn, Amount: money.New(pos.OutstandingMinor, acc.src.Ref.Currency),
+					Description: pos.Name, Status: status})
 			}
 		}
 	}
 	return p, nil
+}
+
+// countRecord counts a record that is not a transaction: an investment or a P2P loan.
+func (p *plan) countRecord(account int, known bool) {
+	p.result.RowsTotal++
+	if known {
+		p.result.Accounts[account].Duplicates++
+		p.result.RowsDuplicate++
+		return
+	}
+	p.result.Accounts[account].New++
+	p.result.RowsNew++
 }
 
 func detect(content []byte) (statement.Parser, statement.Confidence) {
@@ -518,6 +554,13 @@ func (s *Service) write(ctx context.Context, tx pgx.Tx, p *plan, forced bool) er
 		return err
 	}
 	if err := writeInvestments(ctx, tx, p.investments, accountIDs, batchID); err != nil {
+		return err
+	}
+	currencies := make([]string, len(p.accounts))
+	for i, a := range p.accounts {
+		currencies[i] = string(a.src.Ref.Currency)
+	}
+	if err := writePositions(ctx, tx, p.p2p, accountIDs, currencies, batchID); err != nil {
 		return err
 	}
 	if err := analyzeTransactions(ctx, tx); err != nil {
@@ -726,7 +769,7 @@ func (s *Service) List(ctx context.Context) ([]Batch, error) {
 	return batches, eris.Wrap(err, "read imports")
 }
 
-// Rollback removes every transaction and investment record the import created, with
+// Rollback removes every transaction, investment record and P2P loan the import created, with
 // their categories and transfer pairs (F-IMP-4). The batch row stays as history.
 func (s *Service) Rollback(ctx context.Context, id uuid.UUID) (int, error) {
 	var removed int64
@@ -750,6 +793,7 @@ func (s *Service) Rollback(ctx context.Context, id uuid.UUID) (int, error) {
 		for _, deleteRecords := range []string{
 			`DELETE FROM investment_tx WHERE import_batch_id = $1`,
 			`DELETE FROM investment_lot_sale WHERE import_batch_id = $1`,
+			`DELETE FROM p2p_position WHERE import_batch_id = $1`,
 		} {
 			tag, err := tx.Exec(ctx, deleteRecords, id)
 			if err != nil {
@@ -757,8 +801,10 @@ func (s *Service) Rollback(ctx context.Context, id uuid.UUID) (int, error) {
 			}
 			removed += tag.RowsAffected()
 		}
-		_, err = tx.Exec(ctx, `UPDATE import_batch SET status = 'rolled_back', rolled_back_at = now() WHERE id = $1`, id)
-		return eris.Wrap(err, "mark import rolled back")
+		if _, err := tx.Exec(ctx, `UPDATE import_batch SET status = 'rolled_back', rolled_back_at = now() WHERE id = $1`, id); err != nil {
+			return eris.Wrap(err, "mark import rolled back")
+		}
+		return s.loans.Reconcile(ctx, tx)
 	})
 	return int(removed), err
 }

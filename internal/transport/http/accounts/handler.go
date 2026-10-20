@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/agentaccess"
@@ -29,20 +30,21 @@ type Handler struct {
 	repo      *account.Repo
 	banks     *bank.Repo
 	transfers OwnTransferDetector
-	pool      db.Querier
+	pool      *db.Pool
 }
 
-func NewHandler(repo *account.Repo, banks *bank.Repo, transfers OwnTransferDetector, pool db.Querier) *Handler {
+func NewHandler(repo *account.Repo, banks *bank.Repo, transfers OwnTransferDetector, pool *db.Pool) *Handler {
 	return &Handler{repo: repo, banks: banks, transfers: transfers, pool: pool}
 }
 
 type Account struct {
 	ID               uuid.UUID    `json:"id"`
 	Name             string       `json:"name"`
-	Institution      string       `json:"institution" enum:"mbank_cz,mbank_sk,revolut,ibkr,other"`
-	Kind             string       `json:"kind" enum:"current,savings,pocket,fund,broker,cash,card"`
+	Institution      string       `json:"institution" enum:"mbank_cz,mbank_sk,revolut,ibkr,fingood,investown,portu,other"`
+	Kind             string       `json:"kind" enum:"current,savings,pocket,fund,broker,cash,card,p2p,pension,property,other_asset,mortgage,loan,loan_reserve"`
 	Currency         string       `json:"currency"`
 	AccountNumber    *string      `json:"account_number,omitempty"`
+	ParentID         *uuid.UUID   `json:"parent_id,omitempty" doc:"The account this one belongs to: a pocket's main account, a loan reserve's mortgage."`
 	BankID           *string      `json:"bank_id,omitempty" doc:"Bank register id, see GET /banks."`
 	OpeningBalance   money.Amount `json:"opening_balance"`
 	Balance          money.Amount `json:"balance" doc:"Opening balance plus every imported movement."`
@@ -62,7 +64,7 @@ type updateAccountInput struct {
 	ID   uuid.UUID `path:"id"`
 	Body struct {
 		Name                *string `json:"name,omitempty" minLength:"1" maxLength:"100"`
-		Kind                *string `json:"kind,omitempty" enum:"current,savings,pocket,fund,broker,cash,card"`
+		Kind                *string `json:"kind,omitempty" enum:"current,savings,pocket,fund,broker,cash,card,p2p,pension,property,other_asset,mortgage,loan"`
 		OpeningBalanceMinor *int64  `json:"opening_balance_minor,omitempty"`
 		ColorKey            *string `json:"color_key,omitempty" maxLength:"40"`
 		Archived            *bool   `json:"archived,omitempty"`
@@ -77,7 +79,7 @@ type updateAccountOutput struct {
 type createInput struct {
 	Body struct {
 		Name                string  `json:"name" minLength:"1" maxLength:"100"`
-		Kind                string  `json:"kind" enum:"current,savings,pocket,fund,broker,cash,card"`
+		Kind                string  `json:"kind" enum:"current,savings,pocket,fund,broker,cash,card,p2p,pension,property,other_asset,mortgage,loan"`
 		Currency            string  `json:"currency" pattern:"^[A-Z]{3}$"`
 		AccountNumber       *string `json:"account_number,omitempty" maxLength:"50" doc:"Bank number or IBAN; imports of that account then land here."`
 		BankID              *string `json:"bank_id,omitempty" maxLength:"40" doc:"Bank register id; detected from the account number when omitted."`
@@ -198,6 +200,9 @@ func (h *Handler) update(ctx context.Context, in *updateAccountInput) (*updateAc
 	if errors.Is(err, account.ErrNotFound) {
 		return nil, apierr.NotFound()
 	}
+	if errors.Is(err, account.ErrValuationDiffers) {
+		return nil, apierr.Unprocessable(apierr.CodeValuationMismatch)
+	}
 	if err != nil {
 		return nil, apierr.Internal(ctx, err)
 	}
@@ -207,7 +212,7 @@ func (h *Handler) update(ctx context.Context, in *updateAccountInput) (*updateAc
 func toDTO(a *account.Account) Account {
 	return Account{
 		ID: a.ID, Name: a.Name, Institution: string(a.Institution), Kind: string(a.Kind), Currency: string(a.Currency),
-		AccountNumber: a.AccountNumber, BankID: a.BankID, OpeningBalance: money.New(a.OpeningBalanceMinor, a.Currency),
+		AccountNumber: a.AccountNumber, ParentID: a.ParentID, BankID: a.BankID, OpeningBalance: money.New(a.OpeningBalanceMinor, a.Currency),
 		Balance: money.New(a.OpeningBalanceMinor, a.Currency), ColorKey: a.ColorKey, Archived: a.Archived,
 	}
 }
@@ -242,7 +247,11 @@ func (h *Handler) create(ctx context.Context, in *createInput) (*updateAccountOu
 	if err != nil {
 		return nil, apierr.Internal(ctx, err)
 	}
-	if _, err := h.transfers.DetectOwn(ctx, h.pool, nil); err != nil {
+	// Detection also splits payments to a loan account; all of it lands or none.
+	if err := db.WithTx(ctx, h.pool, func(tx pgx.Tx) error {
+		_, err := h.transfers.DetectOwn(ctx, tx, nil)
+		return err
+	}); err != nil {
 		return nil, apierr.Internal(ctx, err)
 	}
 	return &updateAccountOutput{Body: toDTO(a)}, nil
@@ -257,6 +266,8 @@ func (h *Handler) merge(ctx context.Context, in *mergeInput) (*mergeOutput, erro
 		return nil, apierr.Unprocessable(apierr.CodeCurrencyMismatch)
 	case errors.Is(err, account.ErrMergeIntoItself):
 		return nil, apierr.Unprocessable(apierr.CodeMergeIntoItself)
+	case errors.Is(err, account.ErrValuationDiffers):
+		return nil, apierr.Unprocessable(apierr.CodeValuationMismatch)
 	case err != nil:
 		return nil, apierr.Internal(ctx, err)
 	}

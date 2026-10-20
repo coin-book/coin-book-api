@@ -1,5 +1,5 @@
-// Package seed creates demo data for local development: a user, three months of
-// synthetic statements and a small portfolio, imported through the real pipeline.
+// Package seed creates demo data for local development: a user, three months of synthetic
+// statements, a small portfolio, a mortgaged flat, a pension and P2P loans, through the real pipeline.
 package seed
 
 import (
@@ -19,6 +19,7 @@ import (
 	"coin-book-api/internal/domain/categorization"
 	"coin-book-api/internal/domain/identity"
 	"coin-book-api/internal/domain/importing"
+	"coin-book-api/internal/domain/loan"
 	"coin-book-api/internal/domain/settings"
 	"coin-book-api/internal/domain/spending"
 	"coin-book-api/internal/domain/transfer"
@@ -60,7 +61,13 @@ func Demo(ctx context.Context, pool *db.Pool, importsDir string) error {
 
 	categoryRepo := categorization.NewRepo(pool)
 	categorizer := categorization.NewService(pool, categoryRepo, settings.NewRepo(pool))
-	importer := importing.NewService(pool, account.NewRepo(pool), categorizer, transfer.NewService(pool, categorizer), nil, importsDir)
+	loans := loan.NewService(pool, loan.NewRepo(pool), clock.System{})
+	accounts := account.NewRepo(pool)
+	importer := importing.NewService(pool, accounts, categorizer, transfer.NewService(pool, categorizer, loans), loans, nil, importsDir)
+	wealth, err := demoWealthAccounts(ctx, pool, accounts, loans)
+	if err != nil {
+		return err
+	}
 
 	today := clock.Today(clock.System{})
 	from := spending.MonthStart(today).AddDate(0, -(demoMonths - 1), 0)
@@ -76,6 +83,9 @@ func Demo(ctx context.Context, pool *db.Pool, importsDir string) error {
 			return eris.Wrapf(err, "import %s", name)
 		}
 	}
+	if err := demoWealth(ctx, pool, wealth, loans, importer, today); err != nil {
+		return eris.Wrap(err, "demo wealth")
+	}
 	return demoBudget(ctx, pool, categoryRepo, today)
 }
 
@@ -86,15 +96,26 @@ func demoMovements(rng *rand.Rand, from, today time.Time) (mbank, revolut []move
 		switch day.Day() {
 		case 10:
 			mbank = append(mbank, movement{day, "VS:2026001  FIRMA TEST S.R.O.  VYPLATA  000019 2000000001 0800", "Výplata", 6200000})
+		case 5:
+			mbank = append(mbank, movement{day, "ODCHOZÍ PLATBA  FINGOOD INVESTICE  000000 2600000001 2010", "Bez kategorie - jiné", -500000})
 		case 15:
-			mbank = append(mbank, movement{day, "ODCHOZÍ PLATBA  BYTOVE DRUZSTVO TEST  NAJEM  000000 1111111111 0300", "Nájem", -1850000})
+			mbank = append(mbank, movement{day, "ODCHOZÍ PLATBA  SPLATKA HYPOTEKY  000000 4444444444 0800", "Bez kategorie - jiné", -demoMortgage.PaymentMinor})
 		case 18:
 			mbank = append(mbank, movement{day, "INKASO  PRE ELEKTRINA  000000 2222222222 0300", "Pravidelné výdaje - jiné", -210000})
 		case 20:
 			mbank = append(mbank, movement{day, "ODCHOZÍ OKAMŽITÁ PLATBA  DOBITI REVOLUT", "Převod mezi vlastními účty", -500000})
 			revolut = append(revolut, movement{day, "Dobitie z účtu Test", "Dobiť účet", 500000})
+		case 16:
+			mbank = append(mbank, movement{day, "ODCHOZÍ PLATBA  PŘEVOD DO REZERVY  000000 4444000001 0800", "Bez kategorie - jiné", -800000})
+		case 21:
+			// A second top-up next to the 20th's leaves that transfer for the user to pair.
+			if spending.MonthStart(day).Equal(from) {
+				revolut = append(revolut, movement{day, "Dobitie z účtu Test", "Dobiť účet", 500000})
+			}
 		case 22:
 			mbank = append(mbank, movement{day, "NETFLIX.COM  PLATBA NA INTERNETU", "Hudba, filmy, knihy a časopisy", -29900})
+		case 25:
+			mbank = append(mbank, movement{day, "ODCHOZÍ PLATBA  PENZIJNI SPORENI  000000 7777777777 0300", "Bez kategorie - jiné", -170000})
 		}
 		if rng.IntN(3) == 0 {
 			mbank = append(mbank, movement{day, groceries[rng.IntN(len(groceries))] + "  PLATBA KARTOU", "Potraviny a drogerie", -int64(30000 + rng.IntN(150000))})

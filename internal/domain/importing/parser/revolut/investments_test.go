@@ -133,5 +133,5 @@ func TestParseInvestmentRefusesHostileValues(t *testing.T) {
 func TestSecurityDropsWhatIsNotATickerOrName(t *testing.T) {
 	assert.Equal(t, "", security("US0378331005", "CALL +420 123", "").Ticker)
 	assert.Equal(t, "BRK.B", security("US0378331005", "brk.b", "").Ticker)
-	assert.Len(t, []rune(security("US0378331005", "", strings.Repeat("ž", 500)).Name), maxNameLength)
+	assert.Len(t, []rune(security("US0378331005", "", strings.Repeat("ž", 500)).Name), 120)
 }

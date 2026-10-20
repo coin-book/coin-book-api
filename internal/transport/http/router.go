@@ -25,7 +25,9 @@ import (
 	"coin-book-api/internal/transport/http/httpapi"
 	"coin-book-api/internal/transport/http/imports"
 	"coin-book-api/internal/transport/http/investments"
+	"coin-book-api/internal/transport/http/loans"
 	mw "coin-book-api/internal/transport/http/middleware"
+	"coin-book-api/internal/transport/http/networth"
 	"coin-book-api/internal/transport/http/reports"
 	settingshttp "coin-book-api/internal/transport/http/settings"
 	"coin-book-api/internal/transport/http/transactions"
@@ -56,6 +58,8 @@ type Deps struct {
 	AgentTokens  *agenttokens.Handler
 	Settings     *settingshttp.Handler
 	Investments  *investments.Handler
+	NetWorth     *networth.Handler
+	Loans        *loans.Handler
 }
 
 func NewAPI(d Deps) (http.Handler, huma.API) {
@@ -95,12 +99,15 @@ func NewAPI(d Deps) (http.Handler, huma.API) {
 	d.AgentTokens.Register(api)
 	d.Settings.Register(api)
 	d.Investments.Register(api)
+	d.NetWorth.Register(api)
+	d.Loans.Register(api)
 	return r, api
 }
 
 func apiConfig(cfg *config.Config) huma.Config {
 	c := huma.DefaultConfig("coin-book API", apiVersion)
-	c.Info.Description = "Personal finance: accounts, imported transactions, categories, transfers, budgets and reports.\n\n" +
+	c.Info.Description = "Personal finance: accounts, imported transactions, categories, transfers, budgets, reports, investments, " +
+		"loans and net worth.\n\n" +
 		"Amounts are integers in the currency's smallest unit (`minor`) with an ISO 4217 `currency`; " +
 		"currencies are never summed together. Dates are calendar days in Europe/Prague.\n\n" +
 		"Errors are `application/problem+json` (RFC 9457) with a stable `code`; branch on `code`, not `detail`."

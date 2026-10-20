@@ -163,7 +163,7 @@ func (s *Service) bankFor(ctx context.Context, q db.Querier, ref statement.Accou
 		return bank.Known(ctx, q, bank.Revolut)
 	case account.IBKR:
 		return bank.Known(ctx, q, bank.IBKR)
-	case account.MBankCZ, account.MBankSK, account.Other:
+	case account.MBankCZ, account.MBankSK, account.Fingood, account.Investown, account.Portu, account.Other:
 	}
 	return bank.Detect(ctx, q, ref.AccountNumber)
 }

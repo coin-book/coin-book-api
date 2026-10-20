@@ -18,11 +18,14 @@ import (
 type Institution string
 
 const (
-	MBankCZ Institution = "mbank_cz"
-	MBankSK Institution = "mbank_sk"
-	Revolut Institution = "revolut"
-	IBKR    Institution = "ibkr"
-	Other   Institution = "other"
+	MBankCZ   Institution = "mbank_cz"
+	MBankSK   Institution = "mbank_sk"
+	Revolut   Institution = "revolut"
+	IBKR      Institution = "ibkr"
+	Fingood   Institution = "fingood"
+	Investown Institution = "investown"
+	Portu     Institution = "portu"
+	Other     Institution = "other"
 )
 
 type Kind string
@@ -35,12 +38,82 @@ const (
 	Broker  Kind = "broker"
 	Cash    Kind = "cash"
 	Card    Kind = "card"
+
+	P2P        Kind = "p2p"
+	Pension    Kind = "pension"
+	Property   Kind = "property"
+	OtherAsset Kind = "other_asset"
+	Mortgage   Kind = "mortgage"
+	Loan       Kind = "loan"
+	// LoanReserve is money set aside within a mortgage that lowers its interest and can be taken
+	// back (Air Bank's Chytrá rezerva); its parent is the mortgage.
+	LoanReserve Kind = "loan_reserve"
 )
+
+// Valuation is how an account's worth is known (ADR 211).
+type Valuation string
+
+const (
+	// ByLedger: the opening balance plus the transactions.
+	ByLedger Valuation = "ledger"
+	// ByMarket: the ledger's cash plus the positions at market prices.
+	ByMarket Valuation = "market"
+	// BySnapshot: values at dates; between them the last one holds.
+	BySnapshot Valuation = "snapshot"
+	// BySchedule: the balance owed by the loan's repayment schedule.
+	BySchedule Valuation = "schedule"
+	// ByFlows: the money transferred in less the money taken out, from a balance read off a statement.
+	ByFlows Valuation = "flows"
+)
+
+func (k Kind) Valuation() Valuation {
+	switch k {
+	case Broker:
+		return ByMarket
+	case P2P, Pension, Property, OtherAsset:
+		return BySnapshot
+	case Mortgage, Loan:
+		return BySchedule
+	case LoanReserve:
+		return ByFlows
+	default:
+		return ByLedger
+	}
+}
+
+// IsLiability: the account's value is owed, and counts against net worth.
+func (k Kind) IsLiability() bool { return k.Valuation() == BySchedule }
+
+// Liquidity is how soon the money could be spent.
+type Liquidity string
+
+const (
+	Immediate Liquidity = "immediate"
+	// Days: funds and securities, sold within days at the market's price.
+	Days Liquidity = "days"
+	// Locked: tied up until a loan matures, a pension pays out or a property is sold.
+	Locked Liquidity = "locked"
+)
+
+// Liquidity is empty for a liability.
+func (k Kind) Liquidity() Liquidity {
+	switch k {
+	case Fund, Broker:
+		return Days
+	case P2P, Pension, Property, OtherAsset:
+		return Locked
+	case Mortgage, Loan:
+		return ""
+	default:
+		return Immediate
+	}
+}
 
 var (
 	ErrNotFound         = eris.New("account: not found")
 	ErrCurrencyMismatch = eris.New("account: accounts hold different currencies")
 	ErrMergeIntoItself  = eris.New("account: an account cannot be merged into itself")
+	ErrValuationDiffers = eris.New("account: the accounts are valued differently")
 	ErrAliasNotFound    = eris.New("account: alias not found")
 )
 
@@ -187,6 +260,16 @@ type Update struct {
 }
 
 func (r *Repo) Update(ctx context.Context, id uuid.UUID, u Update) (*Account, error) {
+	if u.Kind != nil {
+		current, err := r.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		// The same reason as for merging: a loan's or an asset's records stay with the account.
+		if !mergeable(current.Kind, *u.Kind) {
+			return nil, ErrValuationDiffers
+		}
+	}
 	a, err := scan(r.pool.QueryRow(ctx, `
 		UPDATE account a SET
 			name = coalesce($2, name),
@@ -287,6 +370,9 @@ func (r *Repo) Merge(ctx context.Context, sourceID, targetID uuid.UUID) (int, er
 		if source.Currency != target.Currency {
 			return ErrCurrencyMismatch
 		}
+		if !mergeable(source.Kind, target.Kind) {
+			return ErrValuationDiffers
+		}
 		tag, err := tx.Exec(ctx, `UPDATE transaction SET account_id = $2 WHERE account_id = $1`, sourceID, targetID)
 		if err != nil {
 			return eris.Wrap(err, "move transactions")
@@ -297,6 +383,9 @@ func (r *Repo) Merge(ctx context.Context, sourceID, targetID uuid.UUID) (int, er
 		}
 		if _, err := tx.Exec(ctx, `UPDATE investment_lot_sale SET account_id = $2 WHERE account_id = $1`, sourceID, targetID); err != nil {
 			return eris.Wrap(err, "move sold lots")
+		}
+		if err := moveNetWorthRecords(ctx, tx, sourceID, targetID); err != nil {
+			return err
 		}
 		// A transfer between the two accounts is now a move within one account: no longer a transfer.
 		if _, err := tx.Exec(ctx, `DELETE FROM transfer_pair tp USING transaction o, transaction i
@@ -325,6 +414,35 @@ func (r *Repo) Merge(ctx context.Context, sourceID, targetID uuid.UUID) (int, er
 		return eris.Wrap(err, "delete merged account")
 	})
 	return int(moved), err
+}
+
+// mergeable: a loan's payments or an asset's values would land on an account that does not read
+// them; bank and broker accounts both live on their transactions and merge freely.
+func mergeable(source, target Kind) bool {
+	byTransactions := func(k Kind) bool { return k.Valuation() == ByLedger || k.Valuation() == ByMarket }
+	return source.Valuation() == target.Valuation() || (byTransactions(source) && byTransactions(target))
+}
+
+// moveNetWorthRecords keeps valuations, P2P snapshots, loan terms and loan payments (ADR 211) that
+// would otherwise go with the deleted account; where both accounts hold the same day, the target's stays.
+func moveNetWorthRecords(ctx context.Context, tx pgx.Tx, sourceID, targetID uuid.UUID) error {
+	for _, stmt := range []string{
+		`DELETE FROM account_valuation s USING account_valuation t
+			WHERE s.account_id = $1 AND t.account_id = $2 AND t.valued_on = s.valued_on`,
+		`UPDATE account_valuation SET account_id = $2 WHERE account_id = $1`,
+		`DELETE FROM p2p_position s USING p2p_position t
+			WHERE s.account_id = $1 AND t.account_id = $2 AND t.snapshot_on = s.snapshot_on AND t.loan_number = s.loan_number`,
+		`UPDATE p2p_position SET account_id = $2 WHERE account_id = $1`,
+		`DELETE FROM loan_terms s USING loan_terms t
+			WHERE s.account_id = $1 AND t.account_id = $2 AND t.valid_from = s.valid_from`,
+		`UPDATE loan_terms SET account_id = $2 WHERE account_id = $1`,
+		`UPDATE loan_payment SET account_id = $2 WHERE account_id = $1`,
+	} {
+		if _, err := tx.Exec(ctx, stmt, sourceID, targetID); err != nil {
+			return eris.Wrap(err, "move net worth records")
+		}
+	}
+	return nil
 }
 
 // retargetOwnTransfers points one-leg transfers at the merged account; those that now

@@ -53,10 +53,19 @@ type Transfer struct {
 	MatchedBy            string    `json:"matched_by"`
 }
 
+// LoanPayment is the transaction paying an instalment of an own mortgage or loan (ADR 211).
+type LoanPayment struct {
+	AccountID      uuid.UUID `json:"account_id"`
+	InterestMinor  int64     `json:"interest_minor"`
+	PrincipalMinor int64     `json:"principal_minor"`
+	BySchedule     bool      `json:"by_schedule"`
+}
+
 type Listed struct {
 	Transaction
 	Assignments []Assignment
 	Transfer    *Transfer
+	LoanPayment *LoanPayment
 }
 
 type Filter struct {
@@ -91,7 +100,10 @@ const listQuery = `
 			FROM category_assignment ca WHERE ca.transaction_id = t.id), '[]'::json),
 		(SELECT json_build_object('counterpart_tx_id', tl.counterpart_tx_id, 'counterpart_account_id', tl.counterpart_account_id,
 			'matched_by', tl.matched_by)
-			FROM transfer_leg tl WHERE tl.transaction_id = t.id)
+			FROM transfer_leg tl WHERE tl.transaction_id = t.id),
+		(SELECT json_build_object('account_id', lp.account_id, 'interest_minor', lp.interest_minor,
+			'principal_minor', lp.principal_minor, 'by_schedule', lp.by_schedule)
+			FROM loan_payment lp WHERE lp.transaction_id = t.id)
 	FROM transaction t
 	WHERE ($1::date IS NULL OR t.booked_on >= $1)
 	  AND ($2::date IS NULL OR t.booked_on <= $2)
@@ -165,10 +177,11 @@ func (r *Repo) CountUncategorized(ctx context.Context) (int, error) {
 func scanListed(row pgx.CollectableRow) (Listed, error) {
 	var l Listed
 	var assignments []byte
-	var transfer []byte
+	var transfer, loanPayment []byte
 	err := row.Scan(&l.ID, &l.AccountID, &l.BookedOn, &l.Amount.Minor, &l.Amount.Currency, &l.FeeMinor, &l.Description,
 		&l.Counterparty, &l.CounterpartyAccount, &l.OperationType, &l.Message, &l.VariableSymbol, &l.ConstantSymbol,
-		&l.SpecificSymbol, &l.BankCategory, &l.BalanceAfterMinor, &l.ImportBatchID, &l.SourceLine, &assignments, &transfer)
+		&l.SpecificSymbol, &l.BankCategory, &l.BalanceAfterMinor, &l.ImportBatchID, &l.SourceLine, &assignments, &transfer,
+		&loanPayment)
 	if err != nil {
 		return l, err
 	}
@@ -179,6 +192,12 @@ func scanListed(row pgx.CollectableRow) (Listed, error) {
 		l.Transfer = &Transfer{}
 		if err := json.Unmarshal(transfer, l.Transfer); err != nil {
 			return l, eris.Wrap(err, "decode transfer")
+		}
+	}
+	if len(loanPayment) > 0 {
+		l.LoanPayment = &LoanPayment{}
+		if err := json.Unmarshal(loanPayment, l.LoanPayment); err != nil {
+			return l, eris.Wrap(err, "decode loan payment")
 		}
 	}
 	return l, nil

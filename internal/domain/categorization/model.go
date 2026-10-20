@@ -24,6 +24,8 @@ const (
 	SourceBank   Source = "bank"
 	// SourceModel is the learned classifier's guess above the auto threshold, awaiting confirmation.
 	SourceModel Source = "model"
+	// SourceLoan is a loan instalment split into interest and principal by its schedule (ADR 211).
+	SourceLoan Source = "loan"
 )
 
 var (

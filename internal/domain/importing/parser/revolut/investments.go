@@ -2,10 +2,8 @@ package revolut
 
 import (
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/rotisserie/eris"
 	"github.com/shopspring/decimal"
@@ -37,14 +35,10 @@ const (
 
 var (
 	currencyCode = regexp.MustCompile(`\b[A-Z]{3}\b`)
-	isinPattern  = regexp.MustCompile(`^[A-Z]{2}[A-Z0-9]{9}[0-9]$`)
 	// Plain digits within numeric(28,10): decimal.NewFromString also takes "1e-2147483000",
 	// which costs gigabytes to print.
 	quantityPattern = regexp.MustCompile(`^[0-9]{1,18}(\.[0-9]{1,10})?$`)
-	tickerPattern   = regexp.MustCompile(`^[A-Z0-9][A-Z0-9.\-]{0,11}$`)
 )
-
-const maxNameLength = 120
 
 type investmentState struct {
 	account *statement.Account
@@ -212,49 +206,16 @@ func (r investmentRow) quantity(name string) (decimal.Decimal, error) {
 
 func (r investmentRow) isin(name string, occurrence int) (string, error) {
 	isin := r.cell(name, occurrence)
-	if !isinPattern.MatchString(isin) || !isinCheckDigitValid(isin) {
+	if !statement.ValidISIN(isin) {
 		return "", eris.Errorf("ISIN %q", isin)
 	}
 	return isin, nil
 }
 
-// isinCheckDigitValid applies ISO 6166: letters become 10–35, then the Luhn check.
-func isinCheckDigitValid(isin string) bool {
-	var digits strings.Builder
-	for _, c := range isin {
-		if c >= 'A' && c <= 'Z' {
-			digits.WriteString(strconv.Itoa(int(c-'A') + 10))
-		} else {
-			digits.WriteRune(c)
-		}
-	}
-	s := digits.String()
-	sum := 0
-	for i := len(s) - 1; i >= 0; i-- {
-		d := int(s[i] - '0')
-		if (len(s)-1-i)%2 == 1 {
-			d *= 2
-			if d > 9 {
-				d -= 9
-			}
-		}
-		sum += d
-	}
-	return sum%10 == 0
-}
-
-// security keeps what a statement says about an instrument only when it looks like a
-// ticker and a name: instruments are shared, and their text is shown to other holders.
+// security keeps what a statement says about an instrument only when it looks like a ticker
+// and a name (statement.NewSecurity).
 func security(isin, ticker, name string) statement.Security {
-	ticker = strings.ToUpper(strings.TrimSpace(ticker))
-	if !tickerPattern.MatchString(ticker) {
-		ticker = ""
-	}
-	name = strings.TrimSpace(name)
-	if utf8.RuneCountInString(name) > maxNameLength {
-		name = string([]rune(name)[:maxNameLength])
-	}
-	return statement.Security{ISIN: isin, Ticker: ticker, Name: name}
+	return statement.NewSecurity(isin, ticker, name, "")
 }
 
 func (r investmentRow) dividend(line int) (statement.Dividend, error) {

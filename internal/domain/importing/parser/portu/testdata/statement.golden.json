@@ -1,0 +1,148 @@
+{
+  "Format": "portu-transactions",
+  "Version": 1,
+  "PeriodFrom": "2022-02-01T00:00:00Z",
+  "PeriodTo": "2026-03-09T00:00:00Z",
+  "Accounts": [
+    {
+      "Ref": {
+        "Institution": "portu",
+        "Kind": "broker",
+        "Currency": "CZK",
+        "AccountNumber": null,
+        "ExternalRef": "portu:investments",
+        "Name": "Portu"
+      },
+      "Rows": null,
+      "Totals": null,
+      "DeclaredSum": null,
+      "Investments": {
+        "Buys": [
+          {
+            "Line": 15,
+            "TradedOn": "2022-02-02T00:00:00Z",
+            "Security": {
+              "ISIN": "IE00B5BMR087",
+              "Ticker": "CSPX",
+              "Name": "CSPX LN",
+              "YahooSymbol": "CSPX.L"
+            },
+            "Quantity": "1",
+            "Currency": "USD",
+            "GrossMinor": 40000,
+            "NetMinor": 40000,
+            "GrossCZKMinor": 860000,
+            "NetCZKMinor": 860000,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "buy|2022-02-02|IE00B5BMR087|Rezerva|1|40000"
+          },
+          {
+            "Line": 13,
+            "TradedOn": "2026-01-04T00:00:00Z",
+            "Security": {
+              "ISIN": "CZ0005112300",
+              "Ticker": "CEZ",
+              "Name": "CEZ CP",
+              "YahooSymbol": "CEZ.PR"
+            },
+            "Quantity": "2",
+            "Currency": "CZK",
+            "GrossMinor": 200000,
+            "NetMinor": 200000,
+            "GrossCZKMinor": 200000,
+            "NetCZKMinor": 200000,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "buy|2026-01-04|CZ0005112300|Důchod|2|200000"
+          },
+          {
+            "Line": 10,
+            "TradedOn": "2026-01-05T00:00:00Z",
+            "Security": {
+              "ISIN": "IE00B5BMR087",
+              "Ticker": "CSPX",
+              "Name": "CSPX LN",
+              "YahooSymbol": "CSPX.L"
+            },
+            "Quantity": "1",
+            "Currency": "USD",
+            "GrossMinor": 52000,
+            "NetMinor": 52000,
+            "GrossCZKMinor": 1144000,
+            "NetCZKMinor": 1144000,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "buy|2026-01-05|IE00B5BMR087|Důchod|1|52000"
+          }
+        ],
+        "Dividends": [
+          {
+            "Line": 2,
+            "PaidOn": "2026-03-09T00:00:00Z",
+            "Security": {
+              "ISIN": "US0378331005",
+              "Ticker": "AAPL",
+              "Name": "AAPL US",
+              "YahooSymbol": "AAPL"
+            },
+            "Currency": "USD",
+            "GrossMinor": 1000,
+            "NetMinor": 850,
+            "GrossCZKMinor": 22000,
+            "NetCZKMinor": 18700,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 3300,
+            "IdentityKey": "dividend|2026-03-09|US0378331005|Důchod|1000"
+          }
+        ],
+        "LotSales": [
+          {
+            "Line": 5,
+            "SoldOn": "2026-03-02T00:00:00Z",
+            "BoughtOn": "2022-02-02T00:00:00Z",
+            "Security": {
+              "ISIN": "IE00B5BMR087",
+              "Ticker": "CSPX",
+              "Name": "CSPX LN",
+              "YahooSymbol": "CSPX.L"
+            },
+            "Quantity": "1",
+            "Currency": "USD",
+            "ProceedsMinor": 60000,
+            "CostMinor": 40000,
+            "GainMinor": 20000,
+            "ProceedsCZKMinor": 1320000,
+            "CostCZKMinor": 860000,
+            "GainCZKMinor": 460000,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "lot|2026-03-02|IE00B5BMR087|Důchod|2022-02-02|1|60000"
+          },
+          {
+            "Line": 5,
+            "SoldOn": "2026-03-02T00:00:00Z",
+            "BoughtOn": "2026-01-05T00:00:00Z",
+            "Security": {
+              "ISIN": "IE00B5BMR087",
+              "Ticker": "CSPX",
+              "Name": "CSPX LN",
+              "YahooSymbol": "CSPX.L"
+            },
+            "Quantity": "0.5",
+            "Currency": "USD",
+            "ProceedsMinor": 30000,
+            "CostMinor": 26000,
+            "GainMinor": 4000,
+            "ProceedsCZKMinor": 660000,
+            "CostCZKMinor": 572000,
+            "GainCZKMinor": 88000,
+            "FeeCZKMinor": 0,
+            "TaxCZKMinor": 0,
+            "IdentityKey": "lot|2026-03-02|IE00B5BMR087|Důchod|2026-01-05|0.5|30000"
+          }
+        ]
+      }
+    }
+  ]
+}

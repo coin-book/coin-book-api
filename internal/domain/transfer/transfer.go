@@ -35,6 +35,8 @@ type Pair struct {
 type Candidate struct {
 	TransactionID string
 	CandidateIDs  []string
+	// NumberMatches are the candidates whose account number one leg names as its counterparty.
+	NumberMatches []string
 }
 
 // Categorizer drops automatic categories from transactions once they are known transfers.
@@ -42,13 +44,20 @@ type Categorizer interface {
 	ClearAutomatic(ctx context.Context, q db.Querier, transactionIDs []string) error
 }
 
+// LoanReconciler turns one-leg transfers to a loan into its instalments (ADR 211).
+type LoanReconciler interface {
+	Reconcile(ctx context.Context, q db.Querier) error
+}
+
 type Service struct {
 	pool        *db.Pool
 	categorizer Categorizer
+	loans       LoanReconciler
 }
 
-func NewService(pool *db.Pool, categorizer Categorizer) *Service {
-	return &Service{pool: pool, categorizer: categorizer}
+// NewService takes a nil loans when transfers to loans need not become instalments.
+func NewService(pool *db.Pool, categorizer Categorizer, loans LoanReconciler) *Service {
+	return &Service{pool: pool, categorizer: categorizer, loans: loans}
 }
 
 // candidateSQL lists, for each unpaired transaction in $1 (all when NULL), every
@@ -72,6 +81,7 @@ const candidateSQL = `
 	WHERE ($1::text[] IS NULL OR n.id = ANY($1)) AND n.amount_minor <> 0
 	  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = n.id OR tp.in_tx_id = n.id)
 	  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = c.id OR tp.in_tx_id = c.id)
+	  AND NOT EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id IN (n.id, c.id))
 	ORDER BY n.booked_on, n.id, c.booked_on, c.id`
 
 type edge struct {
@@ -189,6 +199,9 @@ func (s *Service) Ambiguous(ctx context.Context) ([]Candidate, error) {
 		c := Candidate{TransactionID: group[0].from}
 		for _, e := range group {
 			c.CandidateIDs = append(c.CandidateIDs, e.to)
+			if e.strong {
+				c.NumberMatches = append(c.NumberMatches, e.to)
+			}
 		}
 		out = append(out, c)
 	}
@@ -201,6 +214,7 @@ func (s *Service) Pair(ctx context.Context, outTxID, inTxID string) error {
 		err := tx.QueryRow(ctx, `
 			SELECT o.amount_minor < 0 AND i.amount_minor > 0 AND o.account_id <> i.account_id
 				AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id IN (o.id, i.id) OR tp.in_tx_id IN (o.id, i.id))
+				AND NOT EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id IN (o.id, i.id))
 			FROM transaction o, transaction i WHERE o.id = $1 AND i.id = $2`, outTxID, inTxID).Scan(&ok)
 		if err != nil || !ok {
 			return ErrNotPairable

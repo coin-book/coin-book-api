@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rotisserie/eris"
 
+	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/bank"
 	"coin-book-api/internal/platform/db"
 )
@@ -17,7 +18,19 @@ import (
 const (
 	ByNumber       MatchedBy = "number"
 	ByCounterparty MatchedBy = "counterparty"
+	// ByOperation: the bank names the payment's purpose, not the account it went to.
+	ByOperation MatchedBy = "operation"
 )
+
+// operationTargets are the banks that name a payment to a loan by its operation type and leave the
+// counterparty account empty, and the kind of own account each type pays to (seen in Air Bank's export).
+var operationTargets = map[string]map[string]account.Kind{
+	"cz-3030": {
+		"Splátka hypotéky":  account.Mortgage,
+		"Úhrada do rezervy": account.LoanReserve,
+		"Výběr z rezervy":   account.LoanReserve,
+	},
+}
 
 var ErrNotOwnAccount = eris.New("transfer: the account is the transaction's own account or does not exist")
 
@@ -28,10 +41,17 @@ var ownTransferSignals = []string{"VLASTNÍ PŘEVOD", "PŘEVOD NA MSPOŘENÍ", "
 type ownAccounts struct {
 	byNumber       map[string]uuid.UUID
 	byCounterparty map[string]uuid.UUID
+	// byBankKind holds the one account of a kind at a bank; a second makes the pair ambiguous: uuid.Nil.
+	byBankKind map[bankKind]uuid.UUID
+}
+
+type bankKind struct {
+	bank string
+	kind account.Kind
 }
 
 func loadOwnAccounts(ctx context.Context, q db.Querier) (*ownAccounts, error) {
-	own := &ownAccounts{byNumber: map[string]uuid.UUID{}, byCounterparty: map[string]uuid.UUID{}}
+	own := &ownAccounts{byNumber: map[string]uuid.UUID{}, byCounterparty: map[string]uuid.UUID{}, byBankKind: map[bankKind]uuid.UUID{}}
 	rows, err := q.Query(ctx, `SELECT account_number, id FROM account WHERE account_number IS NOT NULL`)
 	if err != nil {
 		return nil, eris.Wrap(err, "list own account numbers")
@@ -48,6 +68,27 @@ func loadOwnAccounts(ctx context.Context, q db.Querier) (*ownAccounts, error) {
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, eris.Wrap(err, "read own account numbers")
+	}
+	rows, err = q.Query(ctx, `SELECT bank_id, kind, id FROM account
+		WHERE bank_id IS NOT NULL AND kind IN ('mortgage', 'loan_reserve') AND NOT archived`)
+	if err != nil {
+		return nil, eris.Wrap(err, "list loan accounts by bank")
+	}
+	for rows.Next() {
+		var key bankKind
+		var id uuid.UUID
+		if err := rows.Scan(&key.bank, &key.kind, &id); err != nil {
+			rows.Close()
+			return nil, eris.Wrap(err, "read loan account")
+		}
+		if _, seen := own.byBankKind[key]; seen {
+			id = uuid.Nil
+		}
+		own.byBankKind[key] = id
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, eris.Wrap(err, "read loan accounts")
 	}
 	rows, err = q.Query(ctx, `SELECT counterparty, account_id FROM own_transfer_rule`)
 	if err != nil {
@@ -79,7 +120,7 @@ func (s *Service) DetectOwn(ctx context.Context, q db.Querier, transactionIDs []
 	if err != nil {
 		return 0, err
 	}
-	if len(own.byNumber) == 0 && len(own.byCounterparty) == 0 {
+	if len(own.byNumber) == 0 && len(own.byCounterparty) == 0 && len(own.byBankKind) == 0 {
 		return 0, nil
 	}
 	var filter any
@@ -87,27 +128,31 @@ func (s *Service) DetectOwn(ctx context.Context, q db.Querier, transactionIDs []
 		filter = transactionIDs
 	}
 	rows, err := q.Query(ctx, `
-		SELECT t.id, t.account_id, coalesce(t.counterparty_account, ''), lower(coalesce(t.counterparty, ''))
-		FROM transaction t
+		SELECT t.id, t.account_id, coalesce(t.counterparty_account, ''), lower(coalesce(t.counterparty, '')),
+			coalesce(t.operation_type, ''), coalesce(a.bank_id, '')
+		FROM transaction t JOIN account a ON a.id = t.account_id
 		WHERE ($1::text[] IS NULL OR t.id = ANY($1)) AND t.amount_minor <> 0
-		  AND (t.counterparty_account IS NOT NULL OR t.counterparty IS NOT NULL)
+		  AND (t.counterparty_account IS NOT NULL OR t.counterparty IS NOT NULL OR t.operation_type IS NOT NULL)
 		  AND NOT EXISTS (SELECT 1 FROM transfer_leg tl WHERE tl.transaction_id = t.id)
-		  AND NOT EXISTS (SELECT 1 FROM not_transfer nt WHERE nt.transaction_id = t.id)`, filter)
+		  AND NOT EXISTS (SELECT 1 FROM not_transfer nt WHERE nt.transaction_id = t.id)
+		  AND NOT EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id = t.id)`, filter)
 	if err != nil {
 		return 0, eris.Wrap(err, "find own transfer candidates")
 	}
 	var matches []ownMatch
 	for rows.Next() {
-		var id, number, counterparty string
+		var id, number, counterparty, operation, bankID string
 		var accountID uuid.UUID
-		if err := rows.Scan(&id, &accountID, &number, &counterparty); err != nil {
+		if err := rows.Scan(&id, &accountID, &number, &counterparty, &operation, &bankID); err != nil {
 			rows.Close()
 			return 0, eris.Wrap(err, "read own transfer candidate")
 		}
 		if target, ok := own.byNumber[bank.CanonicalNumber(number)]; ok && number != "" && target != accountID {
 			matches = append(matches, ownMatch{id, target, ByNumber})
-		} else if target, ok := own.byCounterparty[counterparty]; ok && target != accountID {
+		} else if target, ok := own.byCounterparty[counterparty]; ok && counterparty != "" && target != accountID {
 			matches = append(matches, ownMatch{id, target, ByCounterparty})
+		} else if target := own.byOperation(bankID, operation); target != uuid.Nil && target != accountID {
+			matches = append(matches, ownMatch{id, target, ByOperation})
 		}
 	}
 	rows.Close()
@@ -115,6 +160,16 @@ func (s *Service) DetectOwn(ctx context.Context, q db.Querier, transactionIDs []
 		return 0, eris.Wrap(err, "read own transfer candidates")
 	}
 	return len(matches), s.insertOwn(ctx, q, matches)
+}
+
+// byOperation is the loan or reserve a bank's operation type pays to; uuid.Nil when there is none or
+// the user holds two at that bank.
+func (o *ownAccounts) byOperation(bankID, operation string) uuid.UUID {
+	kind, ok := operationTargets[bankID][operation]
+	if !ok {
+		return uuid.Nil
+	}
+	return o.byBankKind[bankKind{bankID, kind}]
 }
 
 func (s *Service) insertOwn(ctx context.Context, q db.Querier, matches []ownMatch) error {
@@ -135,7 +190,13 @@ func (s *Service) insertOwn(ctx context.Context, q db.Querier, matches []ownMatc
 	if err != nil {
 		return eris.Wrap(err, "insert own transfers")
 	}
-	return s.categorizer.ClearAutomatic(ctx, q, ids)
+	if err := s.categorizer.ClearAutomatic(ctx, q, ids); err != nil {
+		return err
+	}
+	if s.loans == nil {
+		return nil
+	}
+	return s.loans.Reconcile(ctx, q)
 }
 
 // MarkOwn records by hand that a transaction pays to or from accountID. With remember,
@@ -148,6 +209,7 @@ func (s *Service) MarkOwn(ctx context.Context, transactionID string, accountID u
 		err := tx.QueryRow(ctx, `
 			SELECT lower(coalesce(t.counterparty, '')),
 				EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = t.id OR tp.in_tx_id = t.id)
+					OR EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id = t.id)
 			FROM transaction t JOIN account a ON a.id = $2 AND a.id <> t.account_id
 			WHERE t.id = $1`, transactionID, accountID).Scan(&counterparty, &paired)
 		if err != nil || paired {

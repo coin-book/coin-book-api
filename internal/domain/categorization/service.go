@@ -167,7 +167,7 @@ func (s *Service) Assign(ctx context.Context, transactionID string, lines []Line
 }
 
 func (s *Service) replace(ctx context.Context, q db.Querier, transactionID string, lines []Line) error {
-	if err := s.repo.deleteAssignments(ctx, q, []string{transactionID}, []Source{SourceRule, SourceManual, SourceBank, SourceModel}); err != nil {
+	if err := s.repo.deleteAssignments(ctx, q, []string{transactionID}, []Source{SourceRule, SourceManual, SourceBank, SourceModel, SourceLoan}); err != nil {
 		return err
 	}
 	assignments := make([]newAssignment, len(lines))

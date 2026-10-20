@@ -130,11 +130,14 @@ func TestAK4AmbiguousTransferWaitsForTheUser(t *testing.T) {
 		Ambiguous []struct {
 			TransactionID string   `json:"transaction_id"`
 			CandidateIDs  []string `json:"candidate_ids"`
+			NumberMatches []string `json:"number_matches"`
 		} `json:"ambiguous"`
 	}
 	c.do(http.MethodGet, "/api/v1/transfers/ambiguous", nil, http.StatusOK, &ambiguous)
 	require.Len(t, ambiguous.Ambiguous, 1)
 	require.Len(t, ambiguous.Ambiguous[0].CandidateIDs, 2)
+	assert.NotNil(t, ambiguous.Ambiguous[0].NumberMatches)
+	assert.Empty(t, ambiguous.Ambiguous[0].NumberMatches, "a top-up names no account number to tell the two apart")
 
 	pick := ambiguous.Ambiguous[0]
 	c.do(http.MethodPost, "/api/v1/transfers", map[string]string{"out_tx_id": pick.TransactionID, "in_tx_id": pick.CandidateIDs[0]}, http.StatusCreated, nil)

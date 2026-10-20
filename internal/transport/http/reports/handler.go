@@ -7,46 +7,18 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/domain/agentaccess"
-	"coin-book-api/internal/domain/investment"
 	"coin-book-api/internal/domain/report"
-	"coin-book-api/internal/platform/money"
 	"coin-book-api/internal/transport/http/apierr"
 	"coin-book-api/internal/transport/http/dto"
 	"coin-book-api/internal/transport/http/httpapi"
 )
 
-// AccountBalances are the signed-in user's accounts with their balances.
-type AccountBalances interface {
-	ListWithBalances(ctx context.Context) ([]account.WithBalance, error)
-}
-
-type NetWorthCalculator interface {
-	NetWorth(ctx context.Context, balances []money.Amount) (*investment.NetWorth, error)
-}
-
 type Handler struct {
-	service  *report.Service
-	accounts AccountBalances
-	netWorth NetWorthCalculator
+	service *report.Service
 }
 
-func NewHandler(service *report.Service, accounts AccountBalances, netWorth NetWorthCalculator) *Handler {
-	return &Handler{service: service, accounts: accounts, netWorth: netWorth}
-}
-
-type NetWorth struct {
-	TotalCZK          money.Amount `json:"total_czk"`
-	CashCZK           money.Amount `json:"cash_czk" doc:"Balances of the accounts that are not archived, at the latest ČNB rates."`
-	InvestmentsCZK    money.Amount `json:"investments_czk" doc:"Market value of the open positions."`
-	Unconverted       []string     `json:"unconverted" doc:"Currencies held without a ČNB rate yet; their balances are left out."`
-	UnvaluedPositions int          `json:"unvalued_positions" doc:"Positions without a price or rate, left out."`
-}
-
-type netWorthOutput struct {
-	Body NetWorth
-}
+func NewHandler(service *report.Service) *Handler { return &Handler{service: service} }
 
 type monthInput struct {
 	Month    string `path:"month" pattern:"^[0-9]{4}-[0-9]{2}$" example:"2026-10"`
@@ -141,10 +113,6 @@ func (h *Handler) Register(api huma.API) {
 		Errors: []int{422},
 	}}, h.flows)
 	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthRead, Scope: agentaccess.ScopeReportsRead, Operation: huma.Operation{
-		OperationID: "get-net-worth", Method: http.MethodGet, Path: "/api/v1/reports/net-worth",
-		Tags: []string{"Reports"}, Summary: "What the user owns today: account balances and investments, in CZK",
-	}}, h.netWorthReport)
-	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthRead, Scope: agentaccess.ScopeReportsRead, Operation: huma.Operation{
 		OperationID: "get-categories-report", Method: http.MethodGet, Path: "/api/v1/reports/categories",
 		Tags: []string{"Reports"}, Summary: "Spending per main category for each of the last months", Errors: []int{422},
 	}}, h.categories)
@@ -236,30 +204,4 @@ func toCategoryTotals(in []report.CategoryTotal) []CategoryTotal {
 		out[i] = CategoryTotal{CategoryID: c.CategoryID, AmountMinor: c.AmountMinor}
 	}
 	return out
-}
-
-func (h *Handler) netWorthReport(ctx context.Context, _ *struct{}) (*netWorthOutput, error) {
-	accounts, err := h.accounts.ListWithBalances(ctx)
-	if err != nil {
-		return nil, apierr.Internal(ctx, err)
-	}
-	balances := make([]money.Amount, 0, len(accounts))
-	for _, a := range accounts {
-		if !a.Archived {
-			balances = append(balances, a.Balance)
-		}
-	}
-	n, err := h.netWorth.NetWorth(ctx, balances)
-	if err != nil {
-		return nil, apierr.Internal(ctx, err)
-	}
-	out := NetWorth{
-		TotalCZK: money.New(n.TotalCZKMinor(), money.CZK), CashCZK: money.New(n.CashCZKMinor, money.CZK),
-		InvestmentsCZK: money.New(n.InvestmentsCZKMinor, money.CZK), Unconverted: make([]string, 0, len(n.Unconverted)),
-		UnvaluedPositions: n.UnvaluedPositions,
-	}
-	for _, c := range n.Unconverted {
-		out.Unconverted = append(out.Unconverted, string(c))
-	}
-	return &netWorthOutput{Body: out}, nil
 }

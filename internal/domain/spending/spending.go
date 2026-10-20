@@ -62,7 +62,7 @@ type AccountFlow struct {
 	AmountMinor int64
 }
 
-// SetAside nets, per saving account (savings, pocket, fund, broker), the transfers that
+// SetAside nets, per saving account (savings, pocket, fund, broker, loan reserve), the transfers that
 // reached it over [from, to): what the user put aside rather than spent.
 func (r *Repo) SetAside(ctx context.Context, from, to time.Time, currency money.Currency) ([]AccountFlow, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -71,7 +71,7 @@ func (r *Repo) SetAside(ctx context.Context, from, to time.Time, currency money.
 		JOIN transaction t ON t.id = tl.transaction_id
 		JOIN account a ON a.id = tl.counterpart_account_id
 		WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
-		  AND a.kind IN ('savings', 'pocket', 'fund', 'broker')
+		  AND a.kind IN ('savings', 'pocket', 'fund', 'broker', 'loan_reserve')
 		GROUP BY 1 HAVING sum(t.amount_minor) <> 0
 		ORDER BY 2 DESC`, from, to, string(currency))
 	if err != nil {
@@ -143,7 +143,7 @@ func (r *Repo) SavingTransfers(ctx context.Context, from, to time.Time, currency
 		JOIN transaction t ON t.id = tl.transaction_id
 		JOIN account a ON a.id = tl.counterpart_account_id
 		WHERE t.booked_on >= $1 AND t.booked_on < $2 AND t.currency = $3
-		  AND a.kind IN ('savings', 'pocket', 'fund', 'broker')
+		  AND a.kind IN ('savings', 'pocket', 'fund', 'broker', 'loan_reserve')
 		GROUP BY 1, 2 HAVING sum(t.amount_minor) < 0
 		ORDER BY 3 DESC`, from, to, string(currency))
 	if err != nil {
