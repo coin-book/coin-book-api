@@ -21,8 +21,13 @@ build: ## Build the binary into ./tmp
 test: ## Unit and golden tests
 	go test ./...
 
+# The import timing (AK 8, N-3: "on an ordinary laptop") runs alone: alongside the other packages
+# it competes with their Postgres containers for the CI runner's few cores.
+IMPORT_TIMING := TestAK8TenThousandRowsUnderTwoSeconds
+
 test-integration: ## Acceptance and repository tests against Postgres in testcontainers (needs Docker)
-	go test -count=1 -tags integration ./...
+	go test -count=1 -tags integration -skip '^$(IMPORT_TIMING)$$' ./...
+	go test -count=1 -tags integration -run '^$(IMPORT_TIMING)$$' ./internal/acceptance/
 
 lint: $(GOLANGCI_LINT) ## golangci-lint, including the integration-tagged tests
 	$(GOLANGCI_LINT) run --build-tags integration ./...
