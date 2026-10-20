@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/coin-book/coin-book-api/compare/v1.2.0...v1.2.1) (2026-10-20)
+
+
+### Performance
+
+* **api:** link tables carry their owner, transfer and report queries use indexes ([9505c5a](https://github.com/coin-book/coin-book-api/commit/9505c5af0c9f11eb610e4b6a59cf859f4f00f364))
+
 ## [1.2.0](https://github.com/coin-book/coin-book-api/compare/v1.1.0...v1.2.0) (2026-10-20)
 
 
