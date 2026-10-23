@@ -87,7 +87,40 @@ type Portfolio struct {
 	Unvalued          int          `json:"unvalued" doc:"Positions left out of the totals."`
 	RatesOn           *string      `json:"rates_on,omitempty" format:"date" doc:"Day of the ČNB rates used."`
 	IncompleteHistory []Instrument `json:"incomplete_history" doc:"Instruments with sales whose purchase was never imported; import older statements."`
+	MissingBuys       []MissingBuy `json:"missing_buys" doc:"Those purchases as far as the sales tell them: what to import or enter by hand."`
 	Prices            PriceStatus  `json:"prices"`
+}
+
+type MissingBuy struct {
+	AccountID uuid.UUID    `json:"account_id"`
+	ISIN      string       `json:"isin"`
+	BoughtOn  string       `json:"bought_on" format:"date"`
+	Quantity  string       `json:"quantity" doc:"Sold beyond the imported purchases; shares still held from that purchase come on top."`
+	Cost      money.Amount `json:"cost" doc:"That quantity's cost as the broker reported it in the sale."`
+}
+
+type manualBuyInput struct {
+	Body struct {
+		AccountID uuid.UUID `json:"account_id"`
+		ISIN      string    `json:"isin" pattern:"^[A-Z]{2}[A-Z0-9]{9}[0-9]$"`
+		TradedOn  string    `json:"traded_on" format:"date"`
+		Quantity  string    `json:"quantity" pattern:"^[0-9]{1,18}(\\.[0-9]{1,10})?$" doc:"Shares, a decimal." example:"2"`
+		NetMinor  int64     `json:"net_minor" minimum:"0" maximum:"1000000000000000" doc:"What the purchase cost with fees, in minor units."`
+		Currency  string    `json:"currency" doc:"ISO 4217."`
+	}
+}
+
+// earliestManualBuy bounds a purchase entered by hand to the era of online brokers.
+var earliestManualBuy = time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC)
+
+type manualBuyOutput struct {
+	Body struct {
+		ID string `json:"id"`
+	}
+}
+
+type manualBuyIDInput struct {
+	ID string `path:"id" maxLength:"60"`
 }
 
 type portfolioInput struct {
@@ -140,6 +173,8 @@ type isinInput struct {
 }
 
 type Trade struct {
+	ID        string        `json:"id,omitempty" doc:"Buys only."`
+	Manual    bool          `json:"manual" doc:"A purchase the user entered; only these can be deleted."`
 	AccountID uuid.UUID     `json:"account_id"`
 	Kind      string        `json:"kind" enum:"buy,dividend"`
 	Day       string        `json:"day" format:"date"`
@@ -250,6 +285,18 @@ func (h *Handler) Register(api huma.API) {
 		Description: "The symbol is the signed-in user's own; other holders keep theirs. Prices are fetched in the background.",
 		Errors:      []int{404, 422},
 	}}, h.setSymbol)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "add-manual-buy", Method: http.MethodPost, Path: "/api/v1/investments/buys",
+		Tags: []string{"Investments"}, Summary: "Enter a purchase no importable statement holds",
+		Description: "For shares bought before the first statement the broker exports. The instrument must be one the " +
+			"user holds or held; the CZK value uses the ČNB rate of that day.",
+		DefaultStatus: http.StatusCreated, Errors: []int{404, 422},
+	}}, h.addManualBuy)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "delete-manual-buy", Method: http.MethodDelete, Path: "/api/v1/investments/buys/{id}",
+		Tags: []string{"Investments"}, Summary: "Delete a purchase entered by hand",
+		DefaultStatus: http.StatusNoContent, Errors: []int{404},
+	}}, h.deleteManualBuy)
 	httpapi.Register(api, read(huma.Operation{
 		OperationID: "get-price-status", Method: http.MethodGet, Path: "/api/v1/investments/prices/status",
 		Summary: "Whether prices are being fetched and when they last were",
@@ -270,7 +317,11 @@ func (h *Handler) portfolio(ctx context.Context, in *portfolioInput) (*portfolio
 	out := Portfolio{
 		Positions: make([]Position, 0, len(p.Positions)), ValueCZK: czk(p.ValueCZKMinor), CostCZK: czk(p.CostCZKMinor),
 		Unvalued: p.Unvalued, RatesOn: dto.DatePtr(p.RatesOn), IncompleteHistory: make([]Instrument, 0, len(p.IncompleteHistory)),
-		Prices: h.priceStatus(),
+		MissingBuys: make([]MissingBuy, 0, len(p.MissingBuys)), Prices: h.priceStatus(),
+	}
+	for _, m := range p.MissingBuys {
+		out.MissingBuys = append(out.MissingBuys, MissingBuy{AccountID: m.AccountID, ISIN: m.ISIN, BoughtOn: dto.Date(m.BoughtOn),
+			Quantity: m.Quantity.String(), Cost: money.New(m.CostMinor, m.Currency)})
 	}
 	for _, pos := range p.Positions {
 		out.Positions = append(out.Positions, positionDTO(pos))
@@ -337,7 +388,7 @@ func (h *Handler) instrument(ctx context.Context, in *isinInput) (*instrumentOut
 	}
 	for _, b := range d.Buys {
 		q := b.Quantity.String()
-		out.Trades = append(out.Trades, Trade{AccountID: b.AccountID, Kind: "buy", Day: dto.Date(b.TradedOn), Quantity: &q,
+		out.Trades = append(out.Trades, Trade{ID: b.ID, Manual: b.Manual, AccountID: b.AccountID, Kind: "buy", Day: dto.Date(b.TradedOn), Quantity: &q,
 			Net: money.New(b.NetMinor, b.Currency), NetCZK: czkPtr(b.NetCZKMinor)})
 	}
 	for _, dv := range d.Dividends {
@@ -391,6 +442,50 @@ func (h *Handler) setSymbol(ctx context.Context, in *symbolInput) (*instrumentOu
 	}
 	h.refresher.Trigger()
 	return h.instrument(ctx, &isinInput{ISIN: in.ISIN})
+}
+
+func (h *Handler) addManualBuy(ctx context.Context, in *manualBuyInput) (*manualBuyOutput, error) {
+	day, err := dto.ParseDate(in.Body.TradedOn, "body.traded_on")
+	if err != nil {
+		return nil, err
+	}
+	if day == nil || day.Before(earliestManualBuy) || day.After(clock.Today(h.clock)) {
+		return nil, apierr.Validation("body.traded_on", "expected a day from 1990 to today")
+	}
+	quantity, err := decimal.NewFromString(in.Body.Quantity)
+	if err != nil || !quantity.IsPositive() {
+		return nil, apierr.Validation("body.quantity", "expected a positive number of shares")
+	}
+	currency, err := dto.Currency(in.Body.Currency)
+	if err != nil {
+		return nil, err
+	}
+	id, err := h.service.AddManualBuy(ctx, investment.ManualBuy{AccountID: in.Body.AccountID, ISIN: in.Body.ISIN,
+		TradedOn: *day, Quantity: quantity, Currency: currency, NetMinor: in.Body.NetMinor})
+	switch {
+	case errors.Is(err, investment.ErrNotFound):
+		return nil, apierr.NotFound()
+	case errors.Is(err, investment.ErrNotABroker):
+		return nil, apierr.Unprocessable(apierr.CodeNotABroker)
+	case errors.Is(err, investment.ErrCurrencyMismatch):
+		return nil, apierr.Unprocessable(apierr.CodeInstrumentCurrency)
+	case err != nil:
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := &manualBuyOutput{}
+	out.Body.ID = id
+	return out, nil
+}
+
+func (h *Handler) deleteManualBuy(ctx context.Context, in *manualBuyIDInput) (*struct{}, error) {
+	err := h.service.DeleteManualBuy(ctx, in.ID)
+	switch {
+	case errors.Is(err, investment.ErrManualBuyMissing):
+		return nil, apierr.NotFound()
+	case err != nil:
+		return nil, apierr.Internal(ctx, err)
+	}
+	return nil, nil
 }
 
 func (h *Handler) refresh(_ context.Context, _ *struct{}) (*priceStatusOutput, error) {

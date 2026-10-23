@@ -127,6 +127,8 @@ func TestLinkRowsCannotReachAnotherUsersTransactions(t *testing.T) {
 	require.NoError(t, owner.QueryRow(ctx, `SELECT min(id), max(id) FROM transaction WHERE user_id = $1`, bobID).Scan(&bobTx, &bobOtherTx))
 	require.NoError(t, owner.QueryRow(ctx, `SELECT account_id FROM transaction WHERE id = $1`, bobTx).Scan(&bobAccount))
 
+	_, err = owner.Exec(ctx, `INSERT INTO instrument (isin, name) VALUES ('US0378331005', 'Apple') ON CONFLICT DO NOTHING`)
+	require.NoError(t, err)
 	bobCtx, release, err := pg.Pool.ScopeToUser(ctx, bobID)
 	require.NoError(t, err)
 	defer release()
@@ -138,6 +140,8 @@ func TestLinkRowsCannotReachAnotherUsersTransactions(t *testing.T) {
 		`INSERT INTO own_transfer (transaction_id, account_id, matched_by) VALUES ($1, $2, 'manual')`: {bobTx, aliceAccount},
 		`INSERT INTO category_assignment (transaction_id, system_category_id, amount_minor, source)
 			SELECT $1, id, 1, 'manual' FROM category WHERE parent_id IS NOT NULL LIMIT 1`: {aliceTx},
+		`INSERT INTO investment_tx (id, account_id, isin, kind, traded_on, quantity, currency, gross_minor, net_minor)
+			VALUES ('man_probe', $1, 'US0378331005', 'buy', '2021-12-21', 1, 'USD', 100, 100)`: {aliceAccount},
 	}
 	for sql, args := range refused {
 		_, err := pg.Pool.Exec(bobCtx, sql, args...)

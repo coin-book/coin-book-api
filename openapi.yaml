@@ -1694,6 +1694,48 @@ components:
         - cost
         - exempt_from
       type: object
+    ManualBuyInputBody:
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        currency:
+          description: ISO 4217.
+          type: string
+        isin:
+          pattern: ^[A-Z]{2}[A-Z0-9]{9}[0-9]$
+          type: string
+        net_minor:
+          description: What the purchase cost with fees, in minor units.
+          format: int64
+          maximum: 1000000000000000
+          minimum: 0
+          type: integer
+        quantity:
+          description: Shares, a decimal.
+          examples:
+            - "2"
+          pattern: ^[0-9]{1,18}(\.[0-9]{1,10})?$
+          type: string
+        traded_on:
+          format: date
+          type: string
+      required:
+        - account_id
+        - isin
+        - traded_on
+        - quantity
+        - net_minor
+        - currency
+      type: object
+    ManualBuyOutputBody:
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+      required:
+        - id
+      type: object
     MarkOwnInputBody:
       additionalProperties: false
       properties:
@@ -1812,6 +1854,29 @@ components:
           type: integer
       required:
         - moved
+      type: object
+    MissingBuy:
+      additionalProperties: false
+      properties:
+        account_id:
+          type: string
+        bought_on:
+          format: date
+          type: string
+        cost:
+          $ref: "#/components/schemas/Amount"
+          description: That quantity's cost as the broker reported it in the sale.
+        isin:
+          type: string
+        quantity:
+          description: Sold beyond the imported purchases; shares still held from that purchase come on top.
+          type: string
+      required:
+        - account_id
+        - isin
+        - bought_on
+        - quantity
+        - cost
       type: object
     MonthTotals:
       additionalProperties: false
@@ -2210,6 +2275,11 @@ components:
           items:
             $ref: "#/components/schemas/Instrument"
           type: array
+        missing_buys:
+          description: "Those purchases as far as the sales tell them: what to import or enter by hand."
+          items:
+            $ref: "#/components/schemas/MissingBuy"
+          type: array
         positions:
           items:
             $ref: "#/components/schemas/Position"
@@ -2233,6 +2303,7 @@ components:
         - cost_czk
         - unvalued
         - incomplete_history
+        - missing_buys
         - prices
       type: object
     Position:
@@ -2369,6 +2440,7 @@ components:
             - forbidden
             - google_sign_in_failed
             - host_not_allowed
+            - instrument_currency
             - insufficient_scope
             - internal_error
             - invalid_budget_line
@@ -2386,6 +2458,7 @@ components:
             - merge_into_itself
             - method_not_allowed
             - no_loan_terms
+            - not_a_broker
             - not_a_loan
             - not_a_loan_payment
             - not_found
@@ -2754,11 +2827,17 @@ components:
         day:
           format: date
           type: string
+        id:
+          description: Buys only.
+          type: string
         kind:
           enum:
             - buy
             - dividend
           type: string
+        manual:
+          description: A purchase the user entered; only these can be deleted.
+          type: boolean
         net:
           $ref: "#/components/schemas/Amount"
           description: A buy's cost with fees; a dividend after tax.
@@ -2768,6 +2847,7 @@ components:
           description: Buys only.
           type: string
       required:
+        - manual
         - account_id
         - kind
         - day
@@ -4894,6 +4974,106 @@ paths:
       summary: Remove every transaction an import created
       tags:
         - Imports
+  /api/v1/investments/buys:
+    post:
+      description: For shares bought before the first statement the broker exports. The instrument must be one the user holds or held; the CZK value uses the ČNB rate of that day.
+      operationId: add-manual-buy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualBuyInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManualBuyOutputBody"
+          description: Created
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Enter a purchase no importable statement holds
+      tags:
+        - Investments
+  /api/v1/investments/buys/{id}:
+    delete:
+      operationId: delete-manual-buy
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            maxLength: 60
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Delete a purchase entered by hand
+      tags:
+        - Investments
   /api/v1/investments/instruments/{isin}:
     get:
       description: Agent tokens need the `investments:read` scope.

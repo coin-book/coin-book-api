@@ -447,3 +447,101 @@ func TestNetWorthAddsAccountsAndInvestmentsInCZK(t *testing.T) {
 	assert.Equal(t, worth.Cash.Minor+worth.Investments.Minor, worth.Total.Minor)
 	assert.Empty(t, worth.Unconverted)
 }
+
+func TestAPurchaseMissingFromTheStatementsCanBeEnteredByHand(t *testing.T) {
+	c := newMarketClient(t)
+	c.upload("/api/v1/imports", "investments.csv", investmentStatement(t), http.StatusCreated, nil)
+	require.Zero(t, c.prices.Refresh(context.Background()))
+
+	type missingBuys struct {
+		Positions []struct {
+			Instrument struct {
+				Ticker string `json:"ticker"`
+			} `json:"instrument"`
+			Quantity string `json:"quantity"`
+		} `json:"positions"`
+		IncompleteHistory []any `json:"incomplete_history"`
+		Unvalued          int   `json:"unvalued"`
+		MissingBuys       []struct {
+			AccountID string `json:"account_id"`
+			ISIN      string `json:"isin"`
+			BoughtOn  string `json:"bought_on"`
+			Quantity  string `json:"quantity"`
+			Cost      struct {
+				Minor    int64  `json:"minor"`
+				Currency string `json:"currency"`
+			} `json:"cost"`
+		} `json:"missing_buys"`
+	}
+	appleQuantity := func(p missingBuys) string {
+		for _, pos := range p.Positions {
+			if pos.Instrument.Ticker == "AAPL" {
+				return pos.Quantity
+			}
+		}
+		return ""
+	}
+	var before missingBuys
+	c.do(http.MethodGet, "/api/v1/investments/portfolio", nil, http.StatusOK, &before)
+	require.Len(t, before.MissingBuys, 1)
+	missing := before.MissingBuys[0]
+	assert.Equal(t, "US0378331005", missing.ISIN)
+	assert.Equal(t, "2022-03-02", missing.BoughtOn)
+	assert.Equal(t, "2", missing.Quantity)
+	assert.Equal(t, int64(33100), missing.Cost.Minor)
+	assert.Equal(t, "USD", missing.Cost.Currency)
+	assert.Equal(t, "5", appleQuantity(before))
+
+	buy := map[string]any{"account_id": missing.AccountID, "isin": missing.ISIN, "traded_on": missing.BoughtOn,
+		"quantity": "3", "net_minor": 49650, "currency": "USD"}
+	var created struct {
+		ID string `json:"id"`
+	}
+	c.do(http.MethodPost, "/api/v1/investments/buys", buy, http.StatusCreated, &created)
+
+	var after missingBuys
+	c.do(http.MethodGet, "/api/v1/investments/portfolio", nil, http.StatusOK, &after)
+	assert.Equal(t, "6", appleQuantity(after), "the one share left of the three bought in 2022 joins the five")
+	assert.Empty(t, after.MissingBuys)
+	assert.Empty(t, after.IncompleteHistory)
+	assert.Zero(t, after.Unvalued, "valued at the first rate fetched, the purchase being older")
+	var detail struct {
+		Trades []struct {
+			ID     string `json:"id"`
+			Manual bool   `json:"manual"`
+			Kind   string `json:"kind"`
+		} `json:"trades"`
+	}
+	c.do(http.MethodGet, "/api/v1/investments/instruments/US0378331005", nil, http.StatusOK, &detail)
+	var imported string
+	for _, tr := range detail.Trades {
+		if tr.Kind == "buy" && !tr.Manual {
+			imported = tr.ID
+		}
+	}
+	require.NotEmpty(t, imported)
+	c.do(http.MethodDelete, "/api/v1/investments/buys/"+imported, nil, http.StatusNotFound, nil)
+
+	var current struct {
+		ID string `json:"id"`
+	}
+	c.do(http.MethodPost, "/api/v1/accounts", map[string]any{"name": "Běžný", "kind": "current", "currency": "CZK"},
+		http.StatusCreated, &current)
+	buy["account_id"] = current.ID
+	c.do(http.MethodPost, "/api/v1/investments/buys", buy, http.StatusUnprocessableEntity, nil)
+	buy["account_id"], buy["currency"] = missing.AccountID, "EUR"
+	c.do(http.MethodPost, "/api/v1/investments/buys", buy, http.StatusUnprocessableEntity, nil)
+	buy["currency"], buy["isin"] = "USD", "US5949181045"
+	c.do(http.MethodPost, "/api/v1/investments/buys", buy, http.StatusNotFound, nil)
+	buy["isin"], buy["traded_on"] = missing.ISIN, "2999-01-01"
+	c.do(http.MethodPost, "/api/v1/investments/buys", buy, http.StatusUnprocessableEntity, nil)
+	buy["traded_on"] = missing.BoughtOn
+	bob := c.signUp("bob@coinbook.local")
+	bob.do(http.MethodPost, "/api/v1/investments/buys", buy, http.StatusUnprocessableEntity, nil)
+	bob.do(http.MethodDelete, "/api/v1/investments/buys/"+created.ID, nil, http.StatusNotFound, nil)
+
+	c.do(http.MethodDelete, "/api/v1/investments/buys/"+created.ID, nil, http.StatusNoContent, nil)
+	c.do(http.MethodGet, "/api/v1/investments/portfolio", nil, http.StatusOK, &after)
+	assert.Equal(t, "5", appleQuantity(after))
+	assert.Len(t, after.MissingBuys, 1)
+}

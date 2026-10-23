@@ -29,6 +29,9 @@ func PassesTimeTest(boughtOn, soldOn time.Time) bool {
 }
 
 type Buy struct {
+	ID string
+	// Manual: the user entered it for a purchase no imported statement holds.
+	Manual      bool
 	AccountID   uuid.UUID
 	ISIN        string
 	TradedOn    time.Time
@@ -128,4 +131,54 @@ func OpenLots(buys []Buy, sales []LotSale) (lots []Lot, incomplete map[string]bo
 
 func share(total int64, part, whole decimal.Decimal) int64 {
 	return decimal.NewFromInt(total).Mul(part).Div(whole).Round(0).IntPart()
+}
+
+// MissingBuy is the part of a sold lot no imported purchase covers: the purchase the user
+// would have to enter, priced as the broker reported it in the sale.
+type MissingBuy struct {
+	AccountID uuid.UUID
+	ISIN      string
+	BoughtOn  time.Time
+	Quantity  decimal.Decimal
+	Currency  money.Currency
+	CostMinor int64
+}
+
+// MissingPurchases lists, per account, instrument and purchase day, what was sold beyond
+// the imported purchases of that day.
+func MissingPurchases(buys []Buy, sales []LotSale) []MissingBuy {
+	bought := map[lotKey]decimal.Decimal{}
+	for _, b := range buys {
+		key := lotKey{b.AccountID, b.ISIN, b.TradedOn}
+		bought[key] = bought[key].Add(b.Quantity)
+	}
+	type soldLot struct {
+		quantity  decimal.Decimal
+		currency  money.Currency
+		costMinor int64
+	}
+	sold := map[lotKey]*soldLot{}
+	var order []lotKey
+	for _, s := range sales {
+		key := lotKey{s.AccountID, s.ISIN, s.BoughtOn}
+		lot, ok := sold[key]
+		if !ok {
+			lot = &soldLot{currency: s.Currency}
+			sold[key] = lot
+			order = append(order, key)
+		}
+		lot.quantity = lot.quantity.Add(s.Quantity)
+		lot.costMinor += s.CostMinor
+	}
+	var missing []MissingBuy
+	for _, key := range order {
+		lot := sold[key]
+		short := lot.quantity.Sub(bought[key])
+		if !short.IsPositive() {
+			continue
+		}
+		missing = append(missing, MissingBuy{AccountID: key.account, ISIN: key.isin, BoughtOn: key.boughtOn,
+			Quantity: short, Currency: lot.currency, CostMinor: share(lot.costMinor, short, lot.quantity)})
+	}
+	return missing
 }

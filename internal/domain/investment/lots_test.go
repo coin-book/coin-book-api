@@ -67,3 +67,20 @@ func TestOpenLotsKeepsAccountsApart(t *testing.T) {
 	assert.Nil(t, lots[0].CostCZKMinor, "no CZK value without one on the purchase")
 	assert.True(t, incomplete["IE00B4L5Y983"])
 }
+
+func TestMissingPurchasesAreWhatTheSalesTookBeyondTheImportedBuys(t *testing.T) {
+	account := uuid.New()
+	buys := []Buy{{AccountID: account, ISIN: "US0378331005", TradedOn: day(2022, 1, 19), Quantity: qty("1"), Currency: money.USD}}
+	sales := []LotSale{
+		{AccountID: account, ISIN: "US0378331005", BoughtOn: day(2021, 12, 21), SoldOn: day(2025, 10, 20), Quantity: qty("1"),
+			Currency: money.USD, CostMinor: 17200},
+		{AccountID: account, ISIN: "US0378331005", BoughtOn: day(2022, 1, 19), SoldOn: day(2025, 10, 20), Quantity: qty("1.5"),
+			Currency: money.USD, CostMinor: 30000},
+	}
+	assert.Equal(t, []MissingBuy{
+		{AccountID: account, ISIN: "US0378331005", BoughtOn: day(2021, 12, 21), Quantity: qty("1"), Currency: money.USD, CostMinor: 17200},
+		{AccountID: account, ISIN: "US0378331005", BoughtOn: day(2022, 1, 19), Quantity: qty("0.5"), Currency: money.USD, CostMinor: 10000},
+	}, MissingPurchases(buys, sales))
+	assert.Empty(t, MissingPurchases(append(buys, Buy{AccountID: account, ISIN: "US0378331005", TradedOn: day(2021, 12, 21),
+		Quantity: qty("2")}, Buy{AccountID: account, ISIN: "US0378331005", TradedOn: day(2022, 1, 19), Quantity: qty("0.5")}), sales))
+}

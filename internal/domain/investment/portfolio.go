@@ -61,6 +61,8 @@ type Portfolio struct {
 	// IncompleteHistory lists instruments with sold lots whose purchase was never imported:
 	// shares bought before the first imported statement are missing from the positions.
 	IncompleteHistory []Instrument
+	// MissingBuys are those purchases as far as the sales tell them.
+	MissingBuys []MissingBuy
 }
 
 // Portfolio holds one position per instrument, or per instrument and account when perAccount.
@@ -73,7 +75,7 @@ func (s *Service) Portfolio(ctx context.Context, perAccount bool) (*Portfolio, e
 	if err != nil {
 		return nil, err
 	}
-	p := &Portfolio{Positions: positions, IncompleteHistory: []Instrument{}}
+	p := &Portfolio{Positions: positions, IncompleteHistory: []Instrument{}, MissingBuys: MissingPurchases(h.buys, h.sales)}
 	_, incomplete := OpenLots(h.buys, h.sales)
 	for isin := range incomplete {
 		p.IncompleteHistory = append(p.IncompleteHistory, h.instruments[isin])
@@ -364,4 +366,33 @@ func (s *Service) SetYahooSymbol(ctx context.Context, isin, symbol string) error
 		return ErrInvalidSymbol
 	}
 	return s.repo.SetYahooSymbol(ctx, isin, &symbol)
+}
+
+// ManualBuy is a purchase the user enters because no statement they can import holds it.
+type ManualBuy struct {
+	AccountID uuid.UUID
+	ISIN      string
+	TradedOn  time.Time
+	Quantity  decimal.Decimal
+	Currency  money.Currency
+	// NetMinor is what the purchase cost, fees included.
+	NetMinor int64
+}
+
+// AddManualBuy values the purchase in CZK like the rest of the history: at the rate of the
+// day, or the first one fetched when the day is older.
+func (s *Service) AddManualBuy(ctx context.Context, b ManualBuy) (string, error) {
+	rates, err := s.RatesOn(ctx, []time.Time{b.TradedOn}, []money.Currency{b.Currency})
+	if err != nil {
+		return "", err
+	}
+	var czk *int64
+	if minor, ok := rates.ToCZK(b.NetMinor, b.Currency, b.TradedOn); ok {
+		czk = &minor
+	}
+	return s.repo.insertManualBuy(ctx, b, czk)
+}
+
+func (s *Service) DeleteManualBuy(ctx context.Context, id string) error {
+	return s.repo.deleteManualBuy(ctx, id)
 }

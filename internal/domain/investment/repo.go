@@ -2,6 +2,7 @@ package investment
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -10,13 +11,17 @@ import (
 	"github.com/rotisserie/eris"
 	"github.com/shopspring/decimal"
 
+	"coin-book-api/internal/domain/account"
 	"coin-book-api/internal/platform/db"
 	"coin-book-api/internal/platform/money"
 )
 
 var (
-	ErrNotFound      = eris.New("investment: instrument not found")
-	ErrInvalidSymbol = eris.New("investment: invalid Yahoo symbol")
+	ErrNotFound         = eris.New("investment: instrument not found")
+	ErrInvalidSymbol    = eris.New("investment: invalid Yahoo symbol")
+	ErrNotABroker       = eris.New("investment: the account holds no securities")
+	ErrManualBuyMissing = eris.New("investment: no purchase entered by hand with that id")
+	ErrCurrencyMismatch = eris.New("investment: the purchase is in another currency than the instrument's records")
 )
 
 type Instrument struct {
@@ -85,8 +90,8 @@ func (r *Repo) history(ctx context.Context, isin *string) (*history, error) {
 	}
 
 	rows, err = r.pool.Query(ctx, `
-		SELECT account_id, isin, kind, traded_on, coalesce(quantity::text, '0'), currency, gross_minor, net_minor,
-			gross_czk_minor, net_czk_minor, tax_czk_minor
+		SELECT id, import_batch_id IS NULL, account_id, isin, kind, traded_on, coalesce(quantity::text, '0'), currency,
+			gross_minor, net_minor, gross_czk_minor, net_czk_minor, tax_czk_minor
 		FROM investment_tx WHERE ($1::text IS NULL OR isin = $1) ORDER BY traded_on, source_line`, isin)
 	if err != nil {
 		return nil, eris.Wrap(err, "list investment transactions")
@@ -94,9 +99,10 @@ func (r *Repo) history(ctx context.Context, isin *string) (*history, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var d Dividend
-		var kind, quantity string
-		if err := rows.Scan(&d.AccountID, &d.ISIN, &kind, &d.PaidOn, &quantity, &d.Currency, &d.GrossMinor, &d.NetMinor,
-			&d.GrossCZKMinor, &d.NetCZKMinor, &d.TaxCZKMinor); err != nil {
+		var id, kind, quantity string
+		var manual bool
+		if err := rows.Scan(&id, &manual, &d.AccountID, &d.ISIN, &kind, &d.PaidOn, &quantity, &d.Currency, &d.GrossMinor,
+			&d.NetMinor, &d.GrossCZKMinor, &d.NetCZKMinor, &d.TaxCZKMinor); err != nil {
 			return nil, eris.Wrap(err, "read investment transaction")
 		}
 		if kind == "dividend" {
@@ -107,7 +113,7 @@ func (r *Repo) history(ctx context.Context, isin *string) (*history, error) {
 		if err != nil {
 			return nil, eris.Wrap(err, "read quantity")
 		}
-		h.buys = append(h.buys, Buy{AccountID: d.AccountID, ISIN: d.ISIN, TradedOn: d.PaidOn, Quantity: q,
+		h.buys = append(h.buys, Buy{ID: id, Manual: manual, AccountID: d.AccountID, ISIN: d.ISIN, TradedOn: d.PaidOn, Quantity: q,
 			Currency: d.Currency, NetMinor: d.NetMinor, NetCZKMinor: d.NetCZKMinor})
 	}
 	if err := rows.Err(); err != nil {
@@ -384,4 +390,53 @@ func (r *Repo) HeldSymbols(ctx context.Context) ([]string, error) {
 	}
 	symbols, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	return symbols, eris.Wrap(err, "read held symbols")
+}
+
+// insertManualBuy writes a purchase the user entered: the account must be a broker of theirs,
+// the instrument one they hold or held, in the currency its records are in.
+func (r *Repo) insertManualBuy(ctx context.Context, b ManualBuy, czk *int64) (string, error) {
+	var kind string
+	err := r.pool.QueryRow(ctx, `SELECT kind FROM account WHERE id = $1`, b.AccountID).Scan(&kind)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && account.Kind(kind).Valuation() != account.ByMarket {
+		return "", ErrNotABroker
+	}
+	if err != nil {
+		return "", eris.Wrap(err, "get account")
+	}
+	var held bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM instrument i WHERE i.isin = $1 AND `+heldBySignedInUser+`)`,
+		b.ISIN).Scan(&held); err != nil {
+		return "", eris.Wrap(err, "check holding")
+	}
+	if !held {
+		return "", ErrNotFound
+	}
+	var sameCurrency bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM investment_tx WHERE isin = $1 AND currency = $2
+		UNION ALL SELECT 1 FROM investment_lot_sale WHERE isin = $1 AND currency = $2)`,
+		b.ISIN, string(b.Currency)).Scan(&sameCurrency); err != nil {
+		return "", eris.Wrap(err, "check currency")
+	}
+	if !sameCurrency {
+		return "", ErrCurrencyMismatch
+	}
+	id := "man_" + uuid.NewString()
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO investment_tx (id, account_id, isin, kind, traded_on, quantity, currency, gross_minor, net_minor,
+			gross_czk_minor, net_czk_minor)
+		VALUES ($1, $2, $3, 'buy', $4, $5::numeric, $6, $7, $7, $8, $8)`,
+		id, b.AccountID, b.ISIN, b.TradedOn, b.Quantity.String(), string(b.Currency), b.NetMinor, czk)
+	return id, eris.Wrap(err, "insert purchase entered by hand")
+}
+
+func (r *Repo) deleteManualBuy(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM investment_tx WHERE id = $1 AND import_batch_id IS NULL`, id)
+	if err != nil {
+		return eris.Wrap(err, "delete purchase entered by hand")
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrManualBuyMissing
+	}
+	return nil
 }

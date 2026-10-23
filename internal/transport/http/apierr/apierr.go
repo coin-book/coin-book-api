@@ -65,13 +65,15 @@ const (
 
 	CodeInvalidSymbol Code = "invalid_symbol"
 
-	CodeNotValuedByHand   Code = "not_valued_by_hand"
-	CodeNotALoan          Code = "not_a_loan"
-	CodeNoLoanTerms       Code = "no_loan_terms"
-	CodeNotALoanPayment   Code = "not_a_loan_payment"
-	CodeLoanSplitMismatch Code = "loan_split_mismatch"
-	CodeValuationMismatch Code = "valuation_mismatch"
-	CodeReserveExists     Code = "reserve_exists"
+	CodeNotValuedByHand    Code = "not_valued_by_hand"
+	CodeNotALoan           Code = "not_a_loan"
+	CodeNoLoanTerms        Code = "no_loan_terms"
+	CodeNotALoanPayment    Code = "not_a_loan_payment"
+	CodeLoanSplitMismatch  Code = "loan_split_mismatch"
+	CodeValuationMismatch  Code = "valuation_mismatch"
+	CodeReserveExists      Code = "reserve_exists"
+	CodeNotABroker         Code = "not_a_broker"
+	CodeInstrumentCurrency Code = "instrument_currency"
 )
 
 var details = map[Code]string{ //nolint:gosec // G101: error descriptions, not credentials
@@ -125,6 +127,8 @@ var details = map[Code]string{ //nolint:gosec // G101: error descriptions, not c
 	CodeNotALoanPayment:     "The transaction cannot pay this loan: it must be an outgoing payment in the loan's currency from another account, not part of a transfer.",
 	CodeLoanSplitMismatch:   "Interest and principal do not add up to the payment.",
 	CodeReserveExists:       "The mortgage already has a reserve.",
+	CodeNotABroker:          "Purchases of securities belong to an investment account.",
+	CodeInstrumentCurrency:  "The purchase must be in the currency the instrument was traded in.",
 	CodeValuationMismatch:   "Only accounts valued the same way can be merged: bank accounts with bank accounts, assets with assets, loans with loans.",
 }
 
