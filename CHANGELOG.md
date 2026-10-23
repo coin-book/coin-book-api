@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/coin-book/coin-book-api/compare/v1.2.1...v1.3.0) (2026-10-23)
+
+
+### Features
+
+* **api:** enter a purchase the broker's statements leave out ([4bb6715](https://github.com/coin-book/coin-book-api/commit/4bb67155df23d9ed3657ab8411a1a39df320e1ec))
+
 ## [1.2.1](https://github.com/coin-book/coin-book-api/compare/v1.2.0...v1.2.1) (2026-10-20)
 
 
