@@ -90,6 +90,7 @@ type listTransactionsInput struct {
 	Uncategorized bool      `query:"uncategorized" doc:"Only transactions with no category that are not transfers."`
 	AutoAssigned  bool      `query:"auto" doc:"Only transactions the classifier categorised, awaiting confirmation."`
 	Transfers     bool      `query:"transfer" doc:"Only legs of transfers between own accounts."`
+	OperationType string    `query:"operation" maxLength:"64" doc:"Only transactions of this operation type, such as exchange (a Revolut currency exchange)."`
 	Cursor        string    `query:"cursor"`
 	Limit         int       `query:"limit" minimum:"1" maximum:"200" default:"50"`
 }
@@ -203,7 +204,7 @@ func (h *Handler) list(ctx context.Context, in *listTransactionsInput) (*listTra
 	if err != nil {
 		return nil, err
 	}
-	f := transaction.Filter{From: from, To: to, Query: in.Query, Uncategorized: in.Uncategorized, AutoAssigned: in.AutoAssigned, Transfers: in.Transfers,
+	f := transaction.Filter{From: from, To: to, Query: in.Query, Uncategorized: in.Uncategorized, AutoAssigned: in.AutoAssigned, Transfers: in.Transfers, OperationType: in.OperationType,
 		Cursor: in.Cursor, Limit: in.Limit}
 	if f.Limit == 0 || f.Limit > maxPageSize {
 		f.Limit = defaultPageSize

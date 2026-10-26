@@ -6309,6 +6309,14 @@ paths:
           schema:
             description: Only legs of transfers between own accounts.
             type: boolean
+        - description: Only transactions of this operation type, such as exchange (a Revolut currency exchange).
+          explode: false
+          in: query
+          name: operation
+          schema:
+            description: Only transactions of this operation type, such as exchange (a Revolut currency exchange).
+            maxLength: 64
+            type: string
         - explode: false
           in: query
           name: cursor

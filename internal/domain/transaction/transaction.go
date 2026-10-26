@@ -80,8 +80,10 @@ type Filter struct {
 	AutoAssigned bool
 	// Transfers keeps only legs of transfers between own accounts.
 	Transfers bool
-	Cursor    string
-	Limit     int
+	// OperationType keeps only transactions of this type; empty keeps all.
+	OperationType string
+	Cursor        string
+	Limit         int
 }
 
 type Page struct {
@@ -123,6 +125,7 @@ var listQuery = `
 	  AND ($10::text IS NULL OR t.id = $10)
 	  AND (NOT $11 OR EXISTS (SELECT 1 FROM category_assignment ca WHERE ca.transaction_id = t.id AND ca.source = 'model'))
 	  AND (NOT $14 OR NOT (` + transfer.NotALeg("t") + `))
+	  AND ($15 = '' OR t.operation_type = $15)
 	ORDER BY t.booked_on DESC, t.id DESC
 	LIMIT $9`
 
@@ -137,7 +140,7 @@ func (r *Repo) List(ctx context.Context, f Filter) (*Page, error) {
 		amount = &minor
 	}
 	rows, err := r.pool.Query(ctx, listQuery, f.From, f.To, f.AccountID, f.CategoryID, escapeLike(f.Query),
-		f.Uncategorized, cursorDate, cursorID, f.Limit+1, nil, f.AutoAssigned, amount, signed, f.Transfers)
+		f.Uncategorized, cursorDate, cursorID, f.Limit+1, nil, f.AutoAssigned, amount, signed, f.Transfers, f.OperationType)
 	if err != nil {
 		return nil, eris.Wrap(err, "list transactions")
 	}
@@ -155,7 +158,7 @@ func (r *Repo) List(ctx context.Context, f Filter) (*Page, error) {
 }
 
 func (r *Repo) Get(ctx context.Context, id string) (*Listed, error) {
-	rows, err := r.pool.Query(ctx, listQuery, nil, nil, nil, nil, "", false, nil, "", 1, id, false, nil, false, false)
+	rows, err := r.pool.Query(ctx, listQuery, nil, nil, nil, nil, "", false, nil, "", 1, id, false, nil, false, false, "")
 	if err != nil {
 		return nil, eris.Wrap(err, "get transaction")
 	}

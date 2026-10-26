@@ -187,3 +187,17 @@ func transactionIDs(list transactionList) []string {
 	}
 	return ids
 }
+
+func TestCurrencyExchangesAreListedByOperationType(t *testing.T) {
+	c := newClient(t)
+	c.upload("/api/v1/imports", "revolut.csv", revolutStatement(1000000, []row{
+		{"2026-10-12", "Zamenené na EUR", "Zameniť", -250000},
+		{"2026-10-13", "Kaviareň", "Predajca", -9000},
+		{"2026-10-14", "Dobitie", "Dobiť účet", 500000},
+	}), http.StatusCreated, nil)
+
+	exchanges := c.transactions("operation=exchange").Transactions
+	require.Len(t, exchanges, 1)
+	assert.Equal(t, "2026-10-12", exchanges[0].BookedOn)
+	assert.Len(t, c.transactions("").Transactions, 3)
+}
