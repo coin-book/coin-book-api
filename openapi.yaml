@@ -1391,6 +1391,16 @@ components:
       required:
         - banks
       type: object
+    ListCounterpartsOutputBody:
+      additionalProperties: false
+      properties:
+        counterparts:
+          items:
+            $ref: "#/components/schemas/TransferCounterpart"
+          type: array
+      required:
+        - counterparts
+      type: object
     ListImportsOutputBody:
       additionalProperties: false
       properties:
@@ -2252,6 +2262,26 @@ components:
         - outstanding
         - earned
       type: object
+    PairCounterpartInputBody:
+      additionalProperties: false
+      properties:
+        counterpart_tx_id:
+          maxLength: 64
+          type: string
+      required:
+        - counterpart_tx_id
+      type: object
+    PairCounterpartOutputBody:
+      additionalProperties: false
+      properties:
+        released:
+          description: Former partners of either leg, no longer part of any transfer.
+          items:
+            type: string
+          type: array
+      required:
+        - released
+      type: object
     PairTransferInputBody:
       additionalProperties: false
       properties:
@@ -2941,6 +2971,18 @@ components:
       required:
         - counterpart_account_id
         - matched_by
+      type: object
+    TransferCounterpart:
+      additionalProperties: false
+      properties:
+        number_matches:
+          description: "One leg names the other's account number as its counterparty: a likelier match."
+          type: boolean
+        transaction_id:
+          type: string
+      required:
+        - transaction_id
+        - number_matches
       type: object
     TransferFlow:
       additionalProperties: false
@@ -6260,6 +6302,13 @@ paths:
           schema:
             description: Only transactions the classifier categorised, awaiting confirmation.
             type: boolean
+        - description: Only legs of transfers between own accounts.
+          explode: false
+          in: query
+          name: transfer
+          schema:
+            description: Only legs of transfers between own accounts.
+            type: boolean
         - explode: false
           in: query
           name: cursor
@@ -6785,6 +6834,106 @@ paths:
       security:
         - bearerAuth: []
       summary: Undo a transfer; a one-leg transfer is remembered as not a transfer
+      tags:
+        - Transfers
+  /api/v1/transfers/{tx_id}/counterpart:
+    put:
+      description: Any transfer either transaction was part of is undone first.
+      operationId: pair-transfer-counterpart
+      parameters:
+        - in: path
+          name: tx_id
+          required: true
+          schema:
+            maxLength: 64
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PairCounterpartInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairCounterpartOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Pair the transaction with another counterpart by hand
+      tags:
+        - Transfers
+  /api/v1/transfers/{tx_id}/counterparts:
+    get:
+      description: Includes movements already in another transfer; the transaction's current partner is left out.
+      operationId: list-transfer-counterparts
+      parameters:
+        - in: path
+          name: tx_id
+          required: true
+          schema:
+            maxLength: 64
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListCounterpartsOutputBody"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Internal Server Error
+      security:
+        - bearerAuth: []
+      summary: Movements that could be the other leg of the transaction's transfer, likeliest first
       tags:
         - Transfers
   /api/v1/transfers/{tx_id}/own:

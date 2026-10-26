@@ -158,3 +158,41 @@ func TestLinkRowsCannotReachAnotherUsersTransactions(t *testing.T) {
 		aliceID).Scan(&aliceRows))
 	assert.Zero(t, aliceRows)
 }
+
+func TestTransfersCannotBeRepairedAcrossUsers(t *testing.T) {
+	alice := newClient(t)
+	bob := alice.signUp("bob@coinbook.local")
+	alice.upload("/api/v1/imports", "mbank.csv", mbankStatement(t, ownMBankAccount, octoberRows), http.StatusCreated, nil)
+	alice.upload("/api/v1/imports", "revolut.csv", revolutStatement(0, []row{{"2026-10-14", "Dobitie", "Dobiť účet", 500000}}),
+		http.StatusCreated, nil)
+	bob.upload("/api/v1/imports", "revolut.csv", revolutStatement(0, []row{{"2026-10-13", "Dobitie", "Dobiť účet", 500000}}),
+		http.StatusCreated, nil)
+	aliceLegs := transactionIDs(alice.transactions("transfer=true"))
+	require.Len(t, aliceLegs, 2)
+	bobTopup := bob.transactions("").Transactions[0].ID
+
+	bob.do(http.MethodPut, "/api/v1/transfers/"+aliceLegs[0]+"/counterpart", map[string]string{"counterpart_tx_id": bobTopup},
+		http.StatusUnprocessableEntity, nil)
+	bob.do(http.MethodPut, "/api/v1/transfers/"+bobTopup+"/counterpart", map[string]string{"counterpart_tx_id": aliceLegs[0]},
+		http.StatusUnprocessableEntity, nil)
+	bob.do(http.MethodPut, "/api/v1/transfers/"+aliceLegs[0]+"/counterpart", map[string]string{"counterpart_tx_id": aliceLegs[1]},
+		http.StatusUnprocessableEntity, nil)
+	var counterparts struct {
+		Counterparts []any `json:"counterparts"`
+	}
+	bob.do(http.MethodGet, "/api/v1/transfers/"+aliceLegs[0]+"/counterparts", nil, http.StatusOK, &counterparts)
+	assert.Empty(t, counterparts.Counterparts)
+	bob.do(http.MethodGet, "/api/v1/transfers/"+bobTopup+"/counterparts", nil, http.StatusOK, &counterparts)
+	assert.Empty(t, counterparts.Counterparts, "another user's movements are never offered")
+	bob.do(http.MethodDelete, "/api/v1/transfers/"+aliceLegs[0], nil, http.StatusNotFound, nil)
+
+	var created struct {
+		Secret string `json:"secret"`
+	}
+	alice.do(http.MethodPost, "/api/v1/agent-tokens", map[string]any{"name": "asistent", "scopes": []string{"transactions:read"}},
+		http.StatusCreated, &created)
+	alice.withToken(created.Secret).do(http.MethodPut, "/api/v1/transfers/"+aliceLegs[0]+"/counterpart",
+		map[string]string{"counterpart_tx_id": aliceLegs[1]}, http.StatusForbidden, nil)
+
+	assert.ElementsMatch(t, aliceLegs, transactionIDs(alice.transactions("transfer=true")))
+}

@@ -55,6 +55,34 @@ type pairTransferInput struct {
 	}
 }
 
+type listCounterpartsInput struct {
+	TxID string `path:"tx_id" maxLength:"64"`
+}
+
+type TransferCounterpart struct {
+	TransactionID string `json:"transaction_id"`
+	NumberMatches bool   `json:"number_matches" doc:"One leg names the other's account number as its counterparty: a likelier match."`
+}
+
+type listCounterpartsOutput struct {
+	Body struct {
+		Counterparts []TransferCounterpart `json:"counterparts"`
+	}
+}
+
+type pairCounterpartInput struct {
+	TxID string `path:"tx_id" maxLength:"64"`
+	Body struct {
+		CounterpartTxID string `json:"counterpart_tx_id" maxLength:"64"`
+	}
+}
+
+type pairCounterpartOutput struct {
+	Body struct {
+		Released []string `json:"released" doc:"Former partners of either leg, no longer part of any transfer."`
+	}
+}
+
 type unpairInput struct {
 	TxID string `path:"tx_id" maxLength:"64" doc:"Either leg of the transfer."`
 }
@@ -113,6 +141,16 @@ func (h *Handler) Register(api huma.API) {
 		OperationID: "pair-transfer", Method: http.MethodPost, Path: "/api/v1/transfers", Tags: []string{"Transfers"},
 		Summary: "TransferPair two transactions as a transfer by hand", DefaultStatus: http.StatusCreated, Errors: []int{422},
 	}}, h.pair)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "list-transfer-counterparts", Method: http.MethodGet, Path: "/api/v1/transfers/{tx_id}/counterparts",
+		Tags: []string{"Transfers"}, Summary: "Movements that could be the other leg of the transaction's transfer, likeliest first",
+		Description: "Includes movements already in another transfer; the transaction's current partner is left out.",
+	}}, h.counterparts)
+	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
+		OperationID: "pair-transfer-counterpart", Method: http.MethodPut, Path: "/api/v1/transfers/{tx_id}/counterpart",
+		Tags: []string{"Transfers"}, Summary: "Pair the transaction with another counterpart by hand",
+		Description: "Any transfer either transaction was part of is undone first.", Errors: []int{422},
+	}}, h.pairCounterpart)
 	httpapi.Register(api, httpapi.Op{Auth: httpapi.AuthSession, Operation: huma.Operation{
 		OperationID: "unpair-transfer", Method: http.MethodDelete, Path: "/api/v1/transfers/{tx_id}", Tags: []string{"Transfers"},
 		Summary: "Undo a transfer; a one-leg transfer is remembered as not a transfer", DefaultStatus: http.StatusNoContent, Errors: []int{404},
@@ -183,6 +221,32 @@ func (h *Handler) pair(ctx context.Context, in *pairTransferInput) (*struct{}, e
 		return nil, apierr.Internal(ctx, err)
 	}
 	return &struct{}{}, nil
+}
+
+func (h *Handler) counterparts(ctx context.Context, in *listCounterpartsInput) (*listCounterpartsOutput, error) {
+	counterparts, err := h.service.Counterparts(ctx, in.TxID)
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := &listCounterpartsOutput{}
+	out.Body.Counterparts = make([]TransferCounterpart, len(counterparts))
+	for i, c := range counterparts {
+		out.Body.Counterparts[i] = TransferCounterpart{TransactionID: c.TransactionID, NumberMatches: c.NumberMatches}
+	}
+	return out, nil
+}
+
+func (h *Handler) pairCounterpart(ctx context.Context, in *pairCounterpartInput) (*pairCounterpartOutput, error) {
+	released, err := h.service.PairWithCounterpart(ctx, in.TxID, in.Body.CounterpartTxID)
+	if errors.Is(err, transfer.ErrNotPairable) {
+		return nil, apierr.Unprocessable(apierr.CodeNotPairable)
+	}
+	if err != nil {
+		return nil, apierr.Internal(ctx, err)
+	}
+	out := &pairCounterpartOutput{}
+	out.Body.Released = append([]string{}, released...)
+	return out, nil
 }
 
 func (h *Handler) unpair(ctx context.Context, in *unpairInput) (*struct{}, error) {

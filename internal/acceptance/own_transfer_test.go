@@ -136,3 +136,54 @@ func TestMarkedOwnTransferFollowsTheCounterpartyAndBecomesAPair(t *testing.T) {
 	assert.Equal(t, 2, paired, "the imported other leg replaces the one-leg transfer; both legs match the search")
 	assert.Equal(t, 1, oneLeg)
 }
+
+func TestWronglyPairedTransferGetsItsRightCounterpart(t *testing.T) {
+	c := newClient(t)
+	c.upload("/api/v1/imports", "mbank.csv", mbankStatement(t, ownMBankAccount, octoberRows), http.StatusCreated, nil)
+	c.upload("/api/v1/imports", "revolut.csv", revolutStatement(0, []row{
+		{"2026-10-14", "Dobitie", "Dobiť účet", 500000},
+		{"2026-10-17", "Dobitie", "Dobiť účet", 500000},
+	}), http.StatusCreated, nil)
+
+	byDay := map[string]string{}
+	for _, tx := range c.transactions("q=Dobit").Transactions {
+		byDay[tx.BookedOn] = tx.ID
+	}
+	topup, autoPaired, late := byDay["2026-10-12"], byDay["2026-10-14"], byDay["2026-10-17"]
+	require.NotEmpty(t, late)
+	assert.ElementsMatch(t, []string{topup, autoPaired}, transactionIDs(c.transactions("transfer=true")))
+
+	var counterparts struct {
+		Counterparts []struct {
+			TransactionID string `json:"transaction_id"`
+			NumberMatches bool   `json:"number_matches"`
+		} `json:"counterparts"`
+	}
+	c.do(http.MethodGet, "/api/v1/transfers/"+topup+"/counterparts", nil, http.StatusOK, &counterparts)
+	require.Len(t, counterparts.Counterparts, 1, "the current partner is left out; a later booking still counts")
+	assert.Equal(t, late, counterparts.Counterparts[0].TransactionID)
+
+	var repaired struct {
+		Released []string `json:"released"`
+	}
+	c.do(http.MethodPut, "/api/v1/transfers/"+topup+"/counterpart", map[string]string{"counterpart_tx_id": late},
+		http.StatusOK, &repaired)
+	assert.Equal(t, []string{autoPaired}, repaired.Released)
+	assert.ElementsMatch(t, []string{topup, late}, transactionIDs(c.transactions("transfer=true")))
+
+	c.do(http.MethodGet, "/api/v1/transfers/"+autoPaired+"/counterparts", nil, http.StatusOK, &counterparts)
+	require.Len(t, counterparts.Counterparts, 1, "a leg already in another transfer is still offered")
+	assert.Equal(t, topup, counterparts.Counterparts[0].TransactionID)
+
+	coffee := c.transactions("q=KAVARNA").Transactions[0].ID
+	c.do(http.MethodPut, "/api/v1/transfers/"+topup+"/counterpart", map[string]string{"counterpart_tx_id": coffee},
+		http.StatusUnprocessableEntity, nil)
+}
+
+func transactionIDs(list transactionList) []string {
+	ids := make([]string, len(list.Transactions))
+	for i, tx := range list.Transactions {
+		ids[i] = tx.ID
+	}
+	return ids
+}

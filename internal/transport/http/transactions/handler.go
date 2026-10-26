@@ -89,6 +89,7 @@ type listTransactionsInput struct {
 	Query         string    `query:"q" maxLength:"100" doc:"Substring of the description or counterparty, ignoring case and diacritics; or an amount such as 1249,50 (an explicit sign matches that direction only)."`
 	Uncategorized bool      `query:"uncategorized" doc:"Only transactions with no category that are not transfers."`
 	AutoAssigned  bool      `query:"auto" doc:"Only transactions the classifier categorised, awaiting confirmation."`
+	Transfers     bool      `query:"transfer" doc:"Only legs of transfers between own accounts."`
 	Cursor        string    `query:"cursor"`
 	Limit         int       `query:"limit" minimum:"1" maximum:"200" default:"50"`
 }
@@ -202,7 +203,7 @@ func (h *Handler) list(ctx context.Context, in *listTransactionsInput) (*listTra
 	if err != nil {
 		return nil, err
 	}
-	f := transaction.Filter{From: from, To: to, Query: in.Query, Uncategorized: in.Uncategorized, AutoAssigned: in.AutoAssigned,
+	f := transaction.Filter{From: from, To: to, Query: in.Query, Uncategorized: in.Uncategorized, AutoAssigned: in.AutoAssigned, Transfers: in.Transfers,
 		Cursor: in.Cursor, Limit: in.Limit}
 	if f.Limit == 0 || f.Limit > maxPageSize {
 		f.Limit = defaultPageSize
