@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/coin-book/coin-book-api/compare/v1.3.0...v1.4.0) (2026-11-01)
+
+
+### Features
+
+* **api:** filter transactions by operation type, such as currency exchanges ([466ec64](https://github.com/coin-book/coin-book-api/commit/466ec64833344490fff24752eeb7b9a1a8c648c7))
+* **api:** pair a transfer with another counterpart by hand and list only transfers ([569830b](https://github.com/coin-book/coin-book-api/commit/569830b158dba62fc88325ffbee9843d591b9324))
+
 ## [1.3.0](https://github.com/coin-book/coin-book-api/compare/v1.2.1...v1.3.0) (2026-10-23)
 
 
