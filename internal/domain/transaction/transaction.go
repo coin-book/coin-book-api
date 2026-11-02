@@ -52,6 +52,8 @@ type Transfer struct {
 	CounterpartTxID      *string   `json:"counterpart_tx_id"`
 	CounterpartAccountID uuid.UUID `json:"counterpart_account_id"`
 	MatchedBy            string    `json:"matched_by"`
+	// CounterpartAmount is nil with CounterpartTxID.
+	CounterpartAmount *money.Amount `json:"counterpart_amount"`
 }
 
 // LoanPayment is the transaction paying an instalment of an own mortgage or loan (ADR 211).
@@ -104,7 +106,9 @@ var listQuery = `
 		coalesce((SELECT json_agg(json_build_object('category_id', ca.category_id, 'amount_minor', ca.amount_minor, 'source', ca.source))
 			FROM category_assignment ca WHERE ca.transaction_id = t.id), '[]'::json),
 		(SELECT json_build_object('counterpart_tx_id', tl.counterpart_tx_id, 'counterpart_account_id', tl.counterpart_account_id,
-			'matched_by', tl.matched_by)
+			'matched_by', tl.matched_by,
+			'counterpart_amount', (SELECT json_build_object('minor', ct.amount_minor, 'currency', ct.currency)
+				FROM transaction ct WHERE ct.id = tl.counterpart_tx_id))
 			FROM transfer_leg tl WHERE tl.transaction_id = t.id),
 		(SELECT json_build_object('account_id', lp.account_id, 'interest_minor', lp.interest_minor,
 			'principal_minor', lp.principal_minor, 'by_schedule', lp.by_schedule)

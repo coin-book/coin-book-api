@@ -2956,6 +2956,9 @@ components:
       properties:
         counterpart_account_id:
           type: string
+        counterpart_amount:
+          $ref: "#/components/schemas/Amount"
+          description: What the other leg moved, in its account's currency; absent with counterpart_tx_id.
         counterpart_tx_id:
           description: Absent while the other account's statement is not imported.
           type: string

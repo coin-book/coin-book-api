@@ -5,9 +5,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/rotisserie/eris"
 
+	"coin-book-api/internal/domain/bank"
 	"coin-book-api/internal/platform/db"
 )
 
@@ -60,51 +62,53 @@ func NewService(pool *db.Pool, categorizer Categorizer, loans LoanReconciler) *S
 	return &Service{pool: pool, categorizer: categorizer, loans: loans}
 }
 
-// candidateSQL pairs each transaction free to pair ($1 when filtered) with opposite movements in
-// another own account: same amount within the window, or an exchange leg the same day. Each arm
-// joins on an indexed equality; an OR of the two compared every pair of rows.
-func candidateSQL(filtered bool) string {
-	filter := "$1::text[] IS NULL AND "
-	if filtered {
-		filter = "t.id = ANY($1) AND "
-	}
-	return `
+// candidateSQL pairs each transaction free to pair with opposite movements in another own account:
+// same amount within the window ($1), an exchange leg the same day, or a movement in another currency
+// within the window that names an account number. Each arm joins on an indexed equality or range;
+// an OR of them compared every pair of rows.
+var candidateSQL = `
 	WITH n AS (
 		SELECT t.id, t.account_id, t.amount_minor, t.currency, t.booked_on, t.operation_type, t.counterparty_account
 		FROM transaction t
-		WHERE ` + filter + `t.amount_minor <> 0 AND ` + freeToPair("t") + `
+		WHERE t.amount_minor <> 0 AND ` + freeToPair("t") + `
 	), pairs AS (
-		SELECT n.id AS n_id, c.id AS c_id FROM n JOIN transaction c
+		SELECT n.id AS n_id, c.id AS c_id, false AS needs_number FROM n JOIN transaction c
 			ON c.currency = n.currency AND c.amount_minor = -n.amount_minor
-			AND c.booked_on BETWEEN n.booked_on - $2::int AND n.booked_on + $2::int AND c.account_id <> n.account_id
+			AND c.booked_on BETWEEN n.booked_on - $1::int AND n.booked_on + $1::int AND c.account_id <> n.account_id
 		UNION ALL
-		SELECT n.id, c.id FROM n JOIN transaction c
+		SELECT n.id, c.id, false FROM n JOIN transaction c
 			ON c.booked_on = n.booked_on AND c.operation_type = '` + exchangeOperation + `'
 			AND c.currency <> n.currency AND sign(c.amount_minor) = -sign(n.amount_minor) AND c.account_id <> n.account_id
 		WHERE n.operation_type = '` + exchangeOperation + `'
+		UNION ALL
+		SELECT n.id, c.id, true FROM n JOIN transaction c
+			ON c.booked_on BETWEEN n.booked_on - $1::int AND n.booked_on + $1::int
+			AND c.currency <> n.currency AND sign(c.amount_minor) = -sign(n.amount_minor) AND c.account_id <> n.account_id
+		WHERE (n.counterparty_account IS NOT NULL OR c.counterparty_account IS NOT NULL)
+		  AND NOT (n.operation_type IS NOT DISTINCT FROM '` + exchangeOperation + `'
+			AND c.operation_type IS NOT DISTINCT FROM '` + exchangeOperation + `' AND c.booked_on = n.booked_on)
 	)
-	SELECT n.id, n.amount_minor, c.id,
-		coalesce(n.counterparty_account = ca.account_number, false)
-			OR coalesce(c.counterparty_account = na.account_number, false) AS strong,
+	SELECT n.id, n.amount_minor, n.currency, n.account_id, coalesce(n.counterparty_account, ''),
+		c.id, c.amount_minor, c.currency, c.account_id, coalesce(c.counterparty_account, ''), p.needs_number,
+		CASE WHEN p.needs_number THEN ` + czkPerUnitSQL("n.currency", "n.booked_on") + ` END,
+		CASE WHEN p.needs_number THEN ` + czkPerUnitSQL("c.currency", "c.booked_on") + ` END,
 		(SELECT count(*) FROM transaction x
 			WHERE x.currency = c.currency AND x.amount_minor = -c.amount_minor AND x.account_id <> c.account_id
-			  AND x.booked_on BETWEEN c.booked_on - $2::int AND c.booked_on + $2::int
+			  AND x.booked_on BETWEEN c.booked_on - $1::int AND c.booked_on + $1::int
 			  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = x.id)
 			  AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.in_tx_id = x.id)) AS rivals
 	FROM pairs p
 	JOIN n ON n.id = p.n_id
 	JOIN transaction c ON c.id = p.c_id
-	JOIN account na ON na.id = n.account_id
-	JOIN account ca ON ca.id = c.account_id
 	WHERE ` + freeToPair("c") + `
 	ORDER BY n.booked_on, n.id, c.booked_on, c.id`
-}
 
-// freeToPair: the transaction is in no pair and pays no loan instalment.
+// freeToPair: the transaction is in no pair, pays no loan instalment and the user did not undo it as a transfer.
 func freeToPair(alias string) string {
 	return `NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.out_tx_id = ` + alias + `.id)
 		AND NOT EXISTS (SELECT 1 FROM transfer_pair tp WHERE tp.in_tx_id = ` + alias + `.id)
-		AND NOT EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id = ` + alias + `.id)`
+		AND NOT EXISTS (SELECT 1 FROM loan_payment lp WHERE lp.transaction_id = ` + alias + `.id)
+		AND NOT EXISTS (SELECT 1 FROM not_transfer nt WHERE nt.transaction_id = ` + alias + `.id)`
 }
 
 type edge struct {
@@ -115,27 +119,61 @@ type edge struct {
 	rivals int
 }
 
-func loadEdges(ctx context.Context, q db.Querier, ids []string) ([]edge, error) {
-	rows, err := q.Query(ctx, candidateSQL(ids != nil), ids, MatchWindowDays)
+type leg struct {
+	accountID           uuid.UUID
+	counterpartyAccount string
+}
+
+// namesAccountOf: this leg's counterparty account number is the other leg's account.
+func (own *ownAccounts) namesAccountOf(l, other leg) bool {
+	return l.counterpartyAccount != "" && own.byNumber[bank.CanonicalNumber(l.counterpartyAccount)] == other.accountID
+}
+
+// loadEdges keeps a candidate in another currency only when one leg names the other's account
+// and the amounts agree at about the ČNB rate.
+func loadEdges(ctx context.Context, q db.Querier) ([]edge, error) {
+	own, err := loadOwnAccounts(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.Query(ctx, candidateSQL, MatchWindowDays)
 	if err != nil {
 		return nil, eris.Wrap(err, "find transfer candidates")
 	}
-	edges, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (edge, error) {
-		var e edge
-		err := row.Scan(&e.from, &e.amount, &e.to, &e.strong, &e.rivals)
-		return e, err
+	type candidate struct {
+		edge
+		fromLeg, toLeg   leg
+		fromMove, toMove movement
+		needsNumber      bool
+	}
+	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
+		var c candidate
+		err := row.Scan(&c.from, &c.amount, &c.fromMove.currency, &c.fromLeg.accountID, &c.fromLeg.counterpartyAccount,
+			&c.to, &c.toMove.minor, &c.toMove.currency, &c.toLeg.accountID, &c.toLeg.counterpartyAccount, &c.needsNumber,
+			&c.fromMove.czkPerUnit, &c.toMove.czkPerUnit, &c.rivals)
+		c.fromMove.minor = c.amount
+		return c, err
 	})
-	return edges, eris.Wrap(err, "read transfer candidates")
+	if err != nil {
+		return nil, eris.Wrap(err, "read transfer candidates")
+	}
+	edges := make([]edge, 0, len(candidates))
+	for _, c := range candidates {
+		c.strong = own.namesAccountOf(c.fromLeg, c.toLeg) || own.namesAccountOf(c.toLeg, c.fromLeg)
+		if c.needsNumber && (!c.strong || !plausibleConversion(c.fromMove, c.toMove)) {
+			continue
+		}
+		edges = append(edges, c.edge)
+	}
+	return edges, nil
 }
 
-// AutoMatch pairs the given new transactions where the match is unambiguous: a
-// single candidate that has no rival, or a single candidate whose account the
-// payment names. Anything else is left for the user (F-PRE-2).
-func (s *Service) AutoMatch(ctx context.Context, q db.Querier, transactionIDs []string) (int, error) {
-	if len(transactionIDs) == 0 {
-		return 0, nil
-	}
-	edges, err := loadEdges(ctx, q, transactionIDs)
+// AutoMatch pairs every transaction free to pair where the match is unambiguous: a single
+// candidate that has no rival, or a single candidate whose account the payment names. Anything
+// else is left for the user (F-PRE-2). Older transactions count too, so a rule added later and
+// the order of imports change nothing.
+func (s *Service) AutoMatch(ctx context.Context, q db.Querier) (int, error) {
+	edges, err := loadEdges(ctx, q)
 	if err != nil {
 		return 0, err
 	}
@@ -201,12 +239,15 @@ func (s *Service) insert(ctx context.Context, q db.Querier, pairs []Pair, by Mat
 	if _, err := q.Exec(ctx, `DELETE FROM own_transfer WHERE transaction_id = ANY($1)`, ids); err != nil {
 		return eris.Wrap(err, "replace one-leg transfers with the pair")
 	}
+	if _, err := q.Exec(ctx, `DELETE FROM not_transfer WHERE transaction_id = ANY($1)`, ids); err != nil {
+		return eris.Wrap(err, "forget that the legs were no transfer")
+	}
 	return s.categorizer.ClearAutomatic(ctx, q, ids)
 }
 
 // Ambiguous lists unpaired transactions that have more than one plausible counterpart.
 func (s *Service) Ambiguous(ctx context.Context) ([]Candidate, error) {
-	edges, err := loadEdges(ctx, s.pool, nil)
+	edges, err := loadEdges(ctx, s.pool)
 	if err != nil {
 		return nil, err
 	}

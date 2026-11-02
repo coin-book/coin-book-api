@@ -22,6 +22,10 @@ type legView struct {
 		CounterpartTxID      *string `json:"counterpart_tx_id"`
 		CounterpartAccountID string  `json:"counterpart_account_id"`
 		MatchedBy            string  `json:"matched_by"`
+		CounterpartAmount    *struct {
+			Minor    int64  `json:"minor"`
+			Currency string `json:"currency"`
+		} `json:"counterpart_amount"`
 	} `json:"transfer"`
 }
 

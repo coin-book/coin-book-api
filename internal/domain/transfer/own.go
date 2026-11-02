@@ -234,25 +234,32 @@ func (s *Service) MarkOwn(ctx context.Context, transactionID string, accountID u
 	return others, err
 }
 
-// Unpair undoes a transfer. A one-leg transfer is also remembered as not a transfer, so
-// detection by account number does not mark it again.
+// Unpair undoes a transfer. Its legs are remembered as not a transfer, so neither pairing nor
+// detection by account number marks them again after the next import.
 func (s *Service) Unpair(ctx context.Context, transactionID string) error {
 	return db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `DELETE FROM transfer_pair WHERE out_tx_id = $1 OR in_tx_id = $1`, transactionID)
+		rows, err := tx.Query(ctx, `DELETE FROM transfer_pair WHERE out_tx_id = $1 OR in_tx_id = $1
+			RETURNING out_tx_id, in_tx_id`, transactionID)
 		if err != nil {
 			return eris.Wrap(err, "delete transfer pair")
 		}
-		if tag.RowsAffected() > 0 {
-			return nil
-		}
-		tag, err = tx.Exec(ctx, `DELETE FROM own_transfer WHERE transaction_id = $1`, transactionID)
+		undone, err := pgx.CollectRows(rows, pgx.RowToStructByPos[Pair])
 		if err != nil {
-			return eris.Wrap(err, "delete own transfer")
+			return eris.Wrap(err, "read the deleted transfer pair")
 		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotPaired
+		legs := []string{transactionID}
+		if len(undone) > 0 {
+			legs = []string{undone[0].OutTxID, undone[0].InTxID}
+		} else {
+			tag, err := tx.Exec(ctx, `DELETE FROM own_transfer WHERE transaction_id = $1`, transactionID)
+			if err != nil {
+				return eris.Wrap(err, "delete own transfer")
+			}
+			if tag.RowsAffected() == 0 {
+				return ErrNotPaired
+			}
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO not_transfer (transaction_id) VALUES ($1) ON CONFLICT DO NOTHING`, transactionID)
+		_, err = tx.Exec(ctx, `INSERT INTO not_transfer (transaction_id) SELECT unnest($1::text[]) ON CONFLICT DO NOTHING`, legs)
 		return eris.Wrap(err, "remember not a transfer")
 	})
 }

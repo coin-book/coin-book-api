@@ -39,9 +39,10 @@ type Assignment struct {
 }
 
 type Transfer struct {
-	CounterpartTxID      *string   `json:"counterpart_tx_id,omitempty" doc:"Absent while the other account's statement is not imported."`
-	CounterpartAccountID uuid.UUID `json:"counterpart_account_id"`
-	MatchedBy            string    `json:"matched_by" enum:"auto,manual,number,counterparty,operation" doc:"number, counterparty and operation (the bank's operation type): recognised as a transfer to an own account."`
+	CounterpartTxID      *string       `json:"counterpart_tx_id,omitempty" doc:"Absent while the other account's statement is not imported."`
+	CounterpartAccountID uuid.UUID     `json:"counterpart_account_id"`
+	MatchedBy            string        `json:"matched_by" enum:"auto,manual,number,counterparty,operation" doc:"number, counterparty and operation (the bank's operation type): recognised as a transfer to an own account."`
+	CounterpartAmount    *money.Amount `json:"counterpart_amount,omitempty" doc:"What the other leg moved, in its account's currency; absent with counterpart_tx_id."`
 }
 
 type LoanPayment struct {
@@ -382,7 +383,8 @@ func ToDTO(t transaction.Listed) Transaction {
 	}
 	if t.Transfer != nil {
 		out.Transfer = &Transfer{CounterpartTxID: t.Transfer.CounterpartTxID,
-			CounterpartAccountID: t.Transfer.CounterpartAccountID, MatchedBy: t.Transfer.MatchedBy}
+			CounterpartAccountID: t.Transfer.CounterpartAccountID, MatchedBy: t.Transfer.MatchedBy,
+			CounterpartAmount: t.Transfer.CounterpartAmount}
 	}
 	if p := t.LoanPayment; p != nil {
 		out.LoanPayment = &LoanPayment{AccountID: p.AccountID, InterestMinor: p.InterestMinor, PrincipalMinor: p.PrincipalMinor,

@@ -53,7 +53,7 @@ type Categorizer interface {
 }
 
 type TransferMatcher interface {
-	AutoMatch(ctx context.Context, q db.Querier, transactionIDs []string) (int, error)
+	AutoMatch(ctx context.Context, q db.Querier) (int, error)
 	DetectOwn(ctx context.Context, q db.Querier, transactionIDs []string) (int, error)
 }
 
@@ -582,11 +582,7 @@ func (s *Service) write(ctx context.Context, tx pgx.Tx, p *plan, forced bool) er
 	p.result.CategorizedFile, p.result.CategorizedRule, p.result.CategorizedBank = stats.ByFile, stats.ByRule, stats.ByBank
 	p.result.CategorizedModel = stats.ByModel
 
-	ids := make([]string, len(inserted))
-	for i, c := range inserted {
-		ids[i] = c.TransactionID
-	}
-	if p.result.TransfersMatched, err = s.transfers.AutoMatch(ctx, tx, ids); err != nil {
+	if p.result.TransfersMatched, err = s.transfers.AutoMatch(ctx, tx); err != nil {
 		return err
 	}
 	// Not only the new rows: an account this import created may be the target of older payments.
