@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/coin-book/coin-book-api/compare/v1.4.0...v1.5.0) (2026-11-02)
+
+
+### Features
+
+* **api:** pair transfers across currencies by account number and rate, re-pair older ones on every import ([2b86c9f](https://github.com/coin-book/coin-book-api/commit/2b86c9f9dc5f63c66117fe974991b75b00b5cce4))
+
 ## [1.4.0](https://github.com/coin-book/coin-book-api/compare/v1.3.0...v1.4.0) (2026-11-01)
 
 
